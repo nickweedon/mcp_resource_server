@@ -1,18 +1,18 @@
 # Quick Start Guide
 
-Get the MCP Resource Server running with Claude Desktop in 5 minutes.
+Get the MCP Resource Server running with Claude Desktop using Docker in 5 minutes.
 
-## 1. Install Dependencies
+## 1. Build the Docker Image
 
 ```bash
 cd /opt/src/mcp/mcp_resource_server
-uv sync
+docker-compose build
 ```
 
 ## 2. Test the Server
 
 ```bash
-uv run mcp-resource-server
+docker-compose up
 ```
 
 Press `Ctrl+C` to stop. If it starts without errors, you're ready to configure Claude Desktop.
@@ -30,31 +30,32 @@ Press `Ctrl+C` to stop. If it starts without errors, you're ready to configure C
 {
   "mcpServers": {
     "mcp-resource-server": {
-      "command": "uv",
+      "command": "docker",
       "args": [
-        "--directory",
-        "/opt/src/mcp/mcp_resource_server",
         "run",
-        "mcp-resource-server"
+        "--rm",
+        "-i",
+        "-v", "mcp-blob-storage:/mnt/blob-storage",
+        "-v", "/path/to/your/resources:/mnt/resources:ro",
+        "mcp-resource-server:latest"
       ]
     }
   }
 }
 ```
 
-**Important**: Update the path `/opt/src/mcp/mcp_resource_server` to match your actual installation location.
+**Important**: Replace `/path/to/your/resources` with the actual path to your resources directory.
 
 ## 4. Create Required Directories
 
+The blob storage is handled automatically by Docker volumes, but you need to prepare your resources directory:
+
 ```bash
 # Create resources directory (where files are stored)
-mkdir -p /mnt/resources
+mkdir -p /path/to/your/resources
 
-# Create blob storage directory (for shared files)
-mkdir -p /mnt/blob-storage
-
-# Make them accessible
-chmod 755 /mnt/resources /mnt/blob-storage
+# Make it accessible
+chmod 755 /path/to/your/resources
 ```
 
 ## 5. Restart Claude Desktop
@@ -68,7 +69,7 @@ chmod 755 /mnt/resources /mnt/blob-storage
 In Claude Desktop, try asking:
 
 ```
-"Use get_image_info to check if there are any images in /mnt/resources"
+"Use get_image_info to check if there are any images in my resources"
 ```
 
 If the server is working, Claude will attempt to use the tool.
@@ -81,12 +82,12 @@ Once configured, Claude can use these 7 tools:
 - `get_image` - Download and resize images
 - `get_image_info` - Get image metadata
 - `get_image_size_estimate` - Estimate resize results
-- `get_image_resource` - Store image in blob storage
+- `upload_image_resource` - Store image in blob storage
 
 ### File Tools
 - `get_file` - Download file bytes
 - `get_file_url` - Get file URL
-- `get_file_resource` - Store file in blob storage
+- `upload_file_resource` - Store file in blob storage
 
 ## Common First Steps
 
@@ -94,10 +95,10 @@ Once configured, Claude can use these 7 tools:
 
 ```bash
 # Download a sample image
-curl -o /mnt/resources/test.jpg https://picsum.photos/800/600
+curl -o /path/to/your/resources/test.jpg https://picsum.photos/800/600
 
 # Or copy an existing file
-cp /path/to/your/image.jpg /mnt/resources/
+cp /path/to/your/image.jpg /path/to/your/resources/
 ```
 
 ### Test in Claude Desktop
@@ -111,18 +112,17 @@ cp /path/to/your/image.jpg /mnt/resources/
 ## Troubleshooting
 
 ### Can't find the tools?
-- Check Claude Desktop logs: `/workspace/claude-desktop-logs/mcp-server-mcp-resource-server.log`
-- Verify the server starts: `uv run mcp-resource-server`
-- Ensure the path in config is correct
+- Check Docker logs: `docker logs mcp-resource-server`
+- Verify the image was built: `docker images | grep mcp-resource-server`
+- Test container directly: `docker run --rm -it mcp-resource-server:latest`
 
 ### File not found errors?
-- Verify file exists: `ls -l /mnt/resources/your_file_id`
-- Check permissions: `chmod 644 /mnt/resources/your_file_id`
+- Verify file exists: `ls -l /path/to/your/resources/your_file_id`
+- Check volume mount path in docker args matches your resources location
 
 ### Permission denied?
 ```bash
-sudo chown -R $USER:$USER /mnt/resources /mnt/blob-storage
-chmod 755 /mnt/resources /mnt/blob-storage
+chmod -R 755 /path/to/your/resources
 ```
 
 ## Next Steps
@@ -133,21 +133,26 @@ chmod 755 /mnt/resources /mnt/blob-storage
 
 ## Custom Configuration
 
-To use a different resource location or API endpoint:
+To use environment variables or different resource location:
 
 ```json
 {
   "mcpServers": {
     "mcp-resource-server": {
-      "command": "uv",
+      "command": "docker",
       "args": [
-        "--directory",
-        "/opt/src/mcp/mcp_resource_server",
         "run",
-        "mcp-resource-server"
+        "--rm",
+        "-i",
+        "-v", "mcp-blob-storage:/mnt/blob-storage",
+        "-v", "/your/custom/path:/mnt/resources:ro",
+        "mcp-resource-server:latest"
       ],
       "env": {
-        "RESOURCE_SERVER_URL_PATTERN": "file:///your/custom/path/{file_id}"
+        "RESOURCE_SERVER_URL_PATTERN": "file:///mnt/resources/{file_id}",
+        "BLOB_STORAGE_ROOT": "/mnt/blob-storage",
+        "BLOB_MAX_SIZE_MB": "100",
+        "BLOB_TTL_HOURS": "24"
       }
     }
   }
@@ -162,6 +167,6 @@ To use a different resource location or API endpoint:
 ## Support
 
 Need help? Check:
-1. Logs: `/workspace/claude-desktop-logs/mcp-server-mcp-resource-server.log`
-2. Test standalone: `uv run mcp-resource-server`
+1. Docker logs: `docker logs mcp-resource-server`
+2. Test directly: `docker run --rm -it mcp-resource-server:latest`
 3. Full guide: [CLAUDE_DESKTOP_SETUP.md](./CLAUDE_DESKTOP_SETUP.md)

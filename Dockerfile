@@ -1,23 +1,119 @@
-FROM python:3.12-slim
+# MCP Resource Server Dockerfile
+# Multi-stage build with manual file filtering for production
 
-# Upgrade pip to the latest version
-RUN python -m pip install --upgrade pip
+# Build arguments with defaults
+ARG PYTHON_VERSION=3.12
 
-# Install essential packages for development and VS Code remote containers
-RUN apt-get update && \
-    apt-get install -y \
+# Stage 1: Copy all source files (no .dockerignore filtering)
+FROM python:${PYTHON_VERSION}-slim AS source
+
+WORKDIR /source
+COPY . .
+
+# Stage 2: Filter files for production (remove dev-only files)
+FROM python:${PYTHON_VERSION}-slim AS filtered-source
+
+WORKDIR /filtered
+
+# Copy from source and manually filter out development files
+COPY --from=source /source /filtered
+
+# Remove development-only files and directories
+RUN rm -rf \
+    # Git
+    .git \
+    .gitignore \
+    # Python artifacts
+    __pycache__ \
+    *.py[cod] \
+    *.egg-info \
+    .eggs \
+    dist \
+    build \
+    *.egg \
+    # Virtual environments
+    .venv \
+    venv \
+    # Testing
+    .pytest_cache \
+    .coverage \
+    htmlcov \
+    tests \
+    # IDEs
+    .idea \
+    .vscode \
+    # Documentation (keep README.md)
+    docs \
+    CLAUDE.md \
+    # Environment files
+    .env \
+    .env.local \
+    .env.*.local \
+    # Docker files
+    Dockerfile* \
+    docker-compose*.yml \
+    .docker \
+    dockerignore.reference \
+    # Dev container
+    .devcontainer \
+    # Claude
+    .claude \
+    # Logs
+    *.log \
+    logs \
+    # Temporary files
+    tmp \
+    temp \
+    *.tmp \
+    *.bak
+
+# Stage 3: Base production image
+FROM python:${PYTHON_VERSION}-slim AS base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
-    wget \
     ca-certificates \
-    gnupg \
+    # For mcp-mapped-resource-lib MIME detection
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv package manager
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy filtered production files
+COPY --from=filtered-source /filtered /workspace
+
+# Install production dependencies
+RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+
+# Create directory for blob storage
+RUN mkdir -p /mnt/blob-storage
+
+# Stage 4: Production stage
+FROM base AS production
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+# Mount points for persistence
+VOLUME ["/mnt/blob-storage"]
+
+CMD ["uv", "run", "mcp-resource-server"]
+
+# Stage 5: Development stage with all files and additional tools
+FROM python:${PYTHON_VERSION}-slim AS development
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
     sudo \
-    openssh-server \
-    procps \
     lsb-release \
-    locales \
-    build-essential \
-    coreutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI for Docker-outside-of-Docker (DooD) support
@@ -29,50 +125,54 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     apt-get install -y docker-ce-cli docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure locale
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    locale-gen
-
-ENV LANG=en_US.UTF-8 \
-    LANGUAGE=en_US:en \
-    LC_ALL=en_US.UTF-8
-
-# Install Node.js (required for Claude Code CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code
-
-# Create vscode user with uid/gid 1000/1000 for devcontainer use
-ARG CREATE_VSCODE_USER=false
+# Create vscode user with sudo privileges
+ARG CREATE_VSCODE_USER=true
 RUN if [ "$CREATE_VSCODE_USER" = "true" ]; then \
     groupadd --gid 1000 vscode && \
     useradd --uid 1000 --gid 1000 -m -s /bin/bash vscode && \
     echo "vscode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/vscode && \
     chmod 0440 /etc/sudoers.d/vscode && \
-    groupadd docker && \
+    groupadd docker || true && \
     usermod -aG docker vscode; \
     fi
 
+# Set working directory
+WORKDIR /workspace
+
+# Install Node.js for Claude Code CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
 # Install uv package manager for root
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Install uv for vscode user if created
 RUN if [ "$CREATE_VSCODE_USER" = "true" ]; then \
     su - vscode -c "curl -LsSf https://astral.sh/uv/install.sh | sh"; \
     fi
 
-# Set working directory (workspace will be mounted here)
-WORKDIR /workspace
+# Copy ALL files from source (including tests, CLAUDE.md, etc.)
+COPY --from=source /source /workspace
 
-ARG INSTALL_MCP=false
+# Install system dependencies for libmagic
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy project files and install Python dependencies using uv
-COPY . /workspace/
-RUN if [ "$INSTALL_MCP" = "true" ]; then cd /workspace && uv sync; fi
+# Create directory for blob storage
+RUN mkdir -p /mnt/blob-storage
 
-# Default command (will be overridden by docker-compose)
+# Set ownership of workspace to vscode user
+RUN if [ "$CREATE_VSCODE_USER" = "true" ]; then \
+    chown -R vscode:vscode /workspace; \
+    fi
+
+# Don't run uv sync here - let postCreateCommand handle it as vscode user
+# This avoids permission issues with the .venv directory
+
+ENV PYTHONUNBUFFERED=1
 CMD ["/usr/bin/sleep", "infinity"]

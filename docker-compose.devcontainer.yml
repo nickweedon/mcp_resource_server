@@ -1,22 +1,23 @@
 services:
-  mcp-resource-server-vscode:
+  devcontainer:
     build:
       context: .
-      dockerfile: Dockerfile
+      target: development
       args:
-        INSTALL_MCP: false
         CREATE_VSCODE_USER: true
-    image: mcp-resource-server-vscode:latest
-    container_name: mcp-resource-server-devcontainer
-    environment:
-      - RESOURCE_SERVER_URL_PATTERN=${RESOURCE_SERVER_URL_PATTERN:-file:///mnt/resources/{file_id}}
-      - HOST_USER=${USER}
-      - RESOURCE_SERVER_DEBUG=${RESOURCE_SERVER_DEBUG:-true}
-      - RESOURCE_SERVER_MASK_ERRORS=${RESOURCE_SERVER_MASK_ERRORS:-false}
-    # Run as vscode user for devcontainer
     user: vscode
-    # Mount local workspace for live development
+    env_file:
+      - .env
     volumes:
-      - .:/workspace
+      - .:/workspace:cached
       - /var/run/docker.sock:/var/run/docker.sock
-      - /mnt/c/Users/${USER}/AppData/Roaming/Claude/logs:/workspace/claude-desktop-logs:ro
+      # Mount Claude Desktop MCP server logs (read-only)
+      # Note: Path is Windows WSL2-specific, customize for your environment
+      - /mnt/c/Users/nickw/AppData/Roaming/Claude/logs:/workspace/logs:ro
+      # Mount Claude Code config for authentication
+      - /mnt/c/Users/nickw/.config/claude-code:/home/vscode/.config/claude-code:ro
+    ports:
+      - "8000:8000"
+    stdin_open: true
+    tty: true
+    command: sleep infinity

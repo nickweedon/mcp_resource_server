@@ -8,7 +8,7 @@ This MCP Server will be used by Claude Desktop as part of a custom Claude Deskto
 
 ## Debugging
 
-The user's logs relating to usage of this MCP server can be found at /workspace/claude-desktop-logs. More specifically the logs mcp-server-*resource*.log; you should ONLY look at these files in this directory as the other files will not contain any useful information.
+The user's logs relating to usage of this MCP server can be found at /workspace/logs. More specifically the logs mcp-server-*resource*.log; you should ONLY look at these files in this directory as the other files will not contain any useful information.
 You should consult these logs whenever a prompt refers to recent errors in Claude Desktop.
 
 ## Project Structure
@@ -35,7 +35,7 @@ mcp_resource_server/
 1. **Focused Architecture**: Single `resources.py` module contains all 7 resource tools
    - get_image, get_image_info, get_image_size_estimate
    - get_file, get_file_url
-   - get_image_resource, get_file_resource
+   - upload_image_resource, upload_file_resource
 
 2. **Separation of Concerns**:
    - `resources.py` - Resource retrieval methods and blob storage
@@ -93,9 +93,9 @@ The `{file_id}` placeholder is replaced with the actual file identifier when dow
 | `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for downloads |
 | `RESOURCE_SERVER_DEBUG` | `true` | Enable timing/logging |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details |
-| `RESOURCE_SERVER_BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path |
-| `RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB` | `100` | Max file size |
-| `RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS` | `24` | Blob expiration time |
+| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path |
+| `BLOB_MAX_SIZE_MB` | `100` | Max file size |
+| `BLOB_TTL_HOURS` | `24` | Blob expiration time |
 
 ## Blob Storage
 
@@ -117,7 +117,11 @@ result = storage.upload_blob(
     tags=["resource-server", "image", file_id],
     ttl_hours=24
 )
-# Returns: {"blob_id": "blob://...", "mime_type": "...", ...}
+# Returns: {"blob_id": str, "file_path": str, "sha256": str}
+
+# Retrieve additional metadata
+metadata = storage.get_metadata(result["blob_id"])
+# metadata contains: filename, mime_type, size_bytes, expires_at, created_at, tags, etc.
 ```
 
 ## Error Handling
@@ -182,12 +186,12 @@ This server exposes 7 MCP tools for resource operations:
 - **get_image**: Download and resize images (default max 1024px)
 - **get_image_info**: Get metadata (dimensions, format, size)
 - **get_image_size_estimate**: Estimate resize outcome (dry run)
-- **get_image_resource**: Store in blob storage and return identifier
+- **upload_image_resource**: Store in blob storage and return identifier
 
 ### File Tools
 - **get_file**: Download raw file bytes
 - **get_file_url**: Get download URL without fetching
-- **get_file_resource**: Store in blob storage and return identifier
+- **upload_file_resource**: Store in blob storage and return identifier
 
 ## FastMCP Documentation
 

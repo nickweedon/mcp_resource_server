@@ -2,27 +2,68 @@
 .git
 .gitignore
 
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+tests/
+
 # Environment files
 .env
 .env.*
 !.env.example
 
-# Documentation
-README.md
-
-# Docker files
-Dockerfile
-docker-compose.yml
-docker-compose.devcontainer.yml
+# Docker files (multi-stage build uses manual filtering)
+Dockerfile*
+docker-compose*.yml
 .dockerignore
+dockerignore.reference
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-
-# IDE
+# IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+docs/
+CLAUDE.md
+
+# Dev container
+.devcontainer/
+
+# Claude
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db

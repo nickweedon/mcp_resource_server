@@ -29,13 +29,13 @@ mcp = FastMCP(
     ### File Operations
     - **get_file**: Download raw file bytes
     - **get_file_url**: Get download URL without fetching
-    - **get_file_resource**: Store file in shared blob storage
+    - **upload_file_resource**: Store file in shared blob storage
 
     ### Image Operations
     - **get_image**: Download and resize images for display
     - **get_image_info**: Get metadata (dimensions, format, size)
     - **get_image_size_estimate**: Estimate resize dimensions (dry run)
-    - **get_image_resource**: Store resized image in blob storage
+    - **upload_image_resource**: Store resized image in blob storage
 
     ## Configuration
 
@@ -85,7 +85,7 @@ def get_file_url(
 
 
 @mcp.tool()
-def get_file_resource(
+def upload_file_resource(
     file_id: Annotated[str, "File identifier"],
     ttl_hours: Annotated[int | None, "Time-to-live in hours (default: 24)"] = None,
 ) -> resources.ResourceResponse:
@@ -95,7 +95,7 @@ def get_file_resource(
     Downloads file and stores in mapped Docker volume for access by other MCP servers.
     Returns resource identifier with metadata.
     """
-    return resources.get_file_resource(file_id, ttl_hours)
+    return resources.upload_file_resource(file_id, ttl_hours)
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ def get_image_size_estimate(
 
 
 @mcp.tool()
-def get_image_resource(
+def upload_image_resource(
     file_id: Annotated[str, "File identifier"],
     max_width: Annotated[int | None, "Max width in pixels (default: 1024)"] = None,
     max_height: Annotated[int | None, "Max height in pixels (default: 1024)"] = None,
@@ -163,7 +163,7 @@ def get_image_resource(
     Downloads, optionally resizes, and stores image in mapped Docker volume.
     Returns resource identifier for access by other MCP servers.
     """
-    return resources.get_image_resource(file_id, max_width, max_height, quality, ttl_hours)
+    return resources.upload_image_resource(file_id, max_width, max_height, quality, ttl_hours)
 
 
 # =============================================================================

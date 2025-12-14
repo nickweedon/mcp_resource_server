@@ -7,8 +7,8 @@ Provides tool functions for file and image operations:
 - get_image_size_estimate: Estimate dimensions and size after resizing (dry run)
 - get_file: Download a file (datasheet, image, etc.)
 - get_file_url: Get the download URL for a file
-- get_image_resource: Store image in shared storage and return resource identifier
-- get_file_resource: Store file in shared storage and return resource identifier
+- upload_image_resource: Store image in shared storage and return resource identifier
+- upload_file_resource: Store file in shared storage and return resource identifier
 """
 
 import io
@@ -41,9 +41,9 @@ URL_PATTERN = os.environ.get(
 )
 
 # Blob storage configuration
-BLOB_STORAGE_ROOT = os.environ.get("RESOURCE_SERVER_BLOB_STORAGE_ROOT", "/mnt/blob-storage")
-BLOB_STORAGE_MAX_SIZE_MB = int(os.environ.get("RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB", "100"))
-BLOB_STORAGE_TTL_HOURS = int(os.environ.get("RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS", "24"))
+BLOB_STORAGE_ROOT = os.environ.get("BLOB_STORAGE_ROOT", "/mnt/blob-storage")
+BLOB_STORAGE_MAX_SIZE_MB = int(os.environ.get("BLOB_MAX_SIZE_MB", "100"))
+BLOB_STORAGE_TTL_HOURS = int(os.environ.get("BLOB_TTL_HOURS", "24"))
 
 # Lazy initialization of blob storage
 _blob_storage: BlobStorage | None = None
@@ -633,7 +633,7 @@ def get_file_url(file_id: str) -> FileUrlResponse:
     return FileUrlResponse(success=True, url=url)
 
 
-def get_image_resource(
+def upload_image_resource(
     file_id: str,
     max_width: int | None = None,
     max_height: int | None = None,
@@ -665,11 +665,11 @@ def get_image_resource(
         ResourceResponse with:
         - success: Whether the operation succeeded
         - resource_id: Unique identifier for the stored blob (format: blob://TIMESTAMP-HASH.EXT)
-        - filename: Original or generated filename
-        - mime_type: MIME type of the stored image
-        - size_bytes: Size of the stored image in bytes
-        - sha256: SHA256 hash of the image data (for deduplication)
-        - expires_at: ISO 8601 timestamp when the blob expires
+        - filename: Original or generated filename (from metadata)
+        - mime_type: MIME type of the stored image (from metadata)
+        - size_bytes: Size of the stored image in bytes (from metadata)
+        - sha256: SHA256 hash of the image data for deduplication (from upload result)
+        - expires_at: ISO 8601 timestamp when the blob expires (from metadata)
         - error: Error message if unsuccessful
 
     Raises:
@@ -678,16 +678,16 @@ def get_image_resource(
 
     Example:
         # Store image with default settings
-        response = get_image_resource("img_example")
+        response = upload_image_resource("img_example")
         # ResourceResponse(success=True, resource_id="blob://1733437200-a3f9d8c2b1e4f6a7.png",
         #                  filename="img_example.png", mime_type="image/png",
         #                  size_bytes=65536, sha256="a3f9d8c2...", expires_at="2024-12-07T12:00:00Z")
 
         # Store smaller thumbnail
-        response = get_image_resource("img_example", max_width=256, max_height=256)
+        response = upload_image_resource("img_example", max_width=256, max_height=256)
 
         # Store with custom TTL
-        response = get_image_resource("img_example", ttl_hours=48)
+        response = upload_image_resource("img_example", ttl_hours=48)
     """
     try:
         _validate_quality(quality)
@@ -718,17 +718,17 @@ def get_image_resource(
             ttl_hours=ttl_hours,
         )
 
-        # Get metadata to retrieve filename and expires_at
+        # Get metadata to retrieve additional fields
         metadata = storage.get_metadata(result["blob_id"])
 
         return ResourceResponse(
             success=True,
             resource_id=result["blob_id"],
             filename=metadata["filename"],
-            mime_type=result["mime_type"],
-            size_bytes=result["size_bytes"],
+            mime_type=metadata["mime_type"],
+            size_bytes=metadata["size_bytes"],
             sha256=result["sha256"],
-            expires_at=metadata["created_at"],
+            expires_at=metadata["expires_at"],
         )
 
     except ToolError:
@@ -737,7 +737,7 @@ def get_image_resource(
         raise ToolError(f"Failed to create image resource: {e}")
 
 
-def get_file_resource(
+def upload_file_resource(
     file_id: str,
     ttl_hours: int | None = None,
 ) -> ResourceResponse:
@@ -758,11 +758,11 @@ def get_file_resource(
         ResourceResponse with:
         - success: Whether the operation succeeded
         - resource_id: Unique identifier for the stored blob (format: blob://TIMESTAMP-HASH.EXT)
-        - filename: Original or generated filename
-        - mime_type: MIME type of the stored file
-        - size_bytes: Size of the stored file in bytes
-        - sha256: SHA256 hash of the file data (for deduplication)
-        - expires_at: ISO 8601 timestamp when the blob expires
+        - filename: Original or generated filename (from metadata)
+        - mime_type: MIME type of the stored file (from metadata)
+        - size_bytes: Size of the stored file in bytes (from metadata)
+        - sha256: SHA256 hash of the file data for deduplication (from upload result)
+        - expires_at: ISO 8601 timestamp when the blob expires (from metadata)
         - error: Error message if unsuccessful
 
     Raises:
@@ -770,13 +770,13 @@ def get_file_resource(
 
     Example:
         # Store file with default settings
-        response = get_file_resource("datasheet_example")
+        response = upload_file_resource("datasheet_example")
         # ResourceResponse(success=True, resource_id="blob://1733437200-b4e8d9c3a2f5e7b6.pdf",
         #                  filename="datasheet_example.pdf", mime_type="application/pdf",
         #                  size_bytes=524288, sha256="b4e8d9c3...", expires_at="2024-12-07T12:00:00Z")
 
         # Store with custom TTL
-        response = get_file_resource("datasheet_example", ttl_hours=72)
+        response = upload_file_resource("datasheet_example", ttl_hours=72)
     """
     try:
         # Download the file
@@ -798,17 +798,17 @@ def get_file_resource(
             ttl_hours=ttl_hours,
         )
 
-        # Get metadata to retrieve filename and expires_at
+        # Get metadata to retrieve additional fields
         metadata = storage.get_metadata(result["blob_id"])
 
         return ResourceResponse(
             success=True,
             resource_id=result["blob_id"],
             filename=metadata["filename"],
-            mime_type=result["mime_type"],
-            size_bytes=result["size_bytes"],
+            mime_type=metadata["mime_type"],
+            size_bytes=metadata["size_bytes"],
             sha256=result["sha256"],
-            expires_at=metadata["created_at"],
+            expires_at=metadata["expires_at"],
         )
 
     except ToolError:

@@ -1,20 +1,8 @@
 {
-  "name": "MCP Resource Server Development Container",
-
-  // Use docker-compose for DevContainer
+  "name": "MCP Resource Server Development",
   "dockerComposeFile": "../docker-compose.devcontainer.yml",
-  "service": "mcp-resource-server-vscode",
-
-  // Set the default user for VS Code
-  "remoteUser": "vscode",
-
-  // Working directory inside the container
+  "service": "devcontainer",
   "workspaceFolder": "/workspace",
-
-  // Forward ports (add any ports your application needs)
-  "forwardPorts": [],
-
-  // Install VS Code extensions automatically in the container
   "customizations": {
     "vscode": {
       "extensions": [
@@ -22,22 +10,20 @@
         "ms-python.vscode-pylance",
         "ms-python.debugpy",
         "charliermarsh.ruff",
-        "anthropic.claude-code"
+        "anthropics.claude-code",
+        "anthropics.claude"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/home/vscode/.local/bin/uv",
-        "python.terminal.activateEnvironment": true,
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.analysis.typeCheckingMode": "basic",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
       }
     }
   },
-
-  // Run commands after container creation
-  "postCreateCommand": "cd /workspace && uv sync",
-
-  // Fix docker group GID to match host's docker socket and sync dependencies
+  "postCreateCommand": "uv sync",
   "postStartCommand": "sudo chgrp docker /var/run/docker.sock 2>/dev/null || true",
-
-  // Features to add
-  "features": {}
+  "remoteUser": "vscode"
 }

@@ -43,21 +43,20 @@ RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
 # RESOURCE_SERVER_MASK_ERRORS=false
 
 # Blob Storage Configuration (defaults shown)
-# RESOURCE_SERVER_BLOB_STORAGE_ROOT=/mnt/blob-storage
-# RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB=100
-# RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS=24
+# BLOB_STORAGE_ROOT=/mnt/blob-storage
+# BLOB_MAX_SIZE_MB=100
+# BLOB_TTL_HOURS=24
 ```
 
 **Note**: All environment variables are optional and have sensible defaults.
 
-### 3. Run the server
+### 3. Build and run with Docker
 ```bash
-uv run python -m mcp_resource_server.server
-```
+# Build the Docker image
+docker-compose build
 
-Or using the installed script:
-```bash
-uv run mcp-resource-server
+# Run the server
+docker-compose up
 ```
 
 ## Configuration
@@ -87,9 +86,9 @@ RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
 | `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for file downloads |
 | `RESOURCE_SERVER_DEBUG` | `true` | Enable timing/logging middleware |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details from clients |
-| `RESOURCE_SERVER_BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory |
-| `RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB` | `100` | Maximum file size in MB |
-| `RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS` | `24` | Default time-to-live for blobs |
+| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory |
+| `BLOB_MAX_SIZE_MB` | `100` | Maximum file size in MB |
+| `BLOB_TTL_HOURS` | `24` | Default time-to-live for blobs |
 
 ## Available Tools
 
@@ -99,7 +98,7 @@ RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
 |------|-------------|
 | `get_file` | Download raw file bytes |
 | `get_file_url` | Get download URL without fetching |
-| `get_file_resource` | Store file in shared blob storage |
+| `upload_file_resource` | Store file in shared blob storage |
 
 ### Image Operations
 
@@ -108,11 +107,11 @@ RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
 | `get_image` | Download and resize images for display |
 | `get_image_info` | Get metadata (dimensions, format, size) |
 | `get_image_size_estimate` | Estimate resize dimensions (dry run) |
-| `get_image_resource` | Store resized image in blob storage |
+| `upload_image_resource` | Store resized image in blob storage |
 
 ## Shared Blob Storage
 
-The server provides resource-based file storage methods (`get_image_resource` and `get_file_resource`) that enable sharing files with other MCP servers through a mapped Docker volume.
+The server provides resource-based file storage methods (`upload_image_resource` and `upload_file_resource`) that enable sharing files with other MCP servers through a mapped Docker volume.
 
 ### How It Works
 
@@ -134,7 +133,7 @@ services:
     volumes:
       - blob-storage:/mnt/blob-storage
     environment:
-      - RESOURCE_SERVER_BLOB_STORAGE_ROOT=/mnt/blob-storage
+      - BLOB_STORAGE_ROOT=/mnt/blob-storage
 
   other-mcp-server:
     image: other-mcp:latest
@@ -149,7 +148,7 @@ volumes:
 
 ```python
 # Store an image in shared storage
-response = get_image_resource("img_example")
+response = upload_image_resource("img_example")
 # Returns: ResourceResponse(
 #   success=True,
 #   resource_id="blob://1733437200-a3f9d8c2b1e4f6a7.png",
