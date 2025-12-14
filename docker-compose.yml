@@ -1,0 +1,22 @@
+services:
+  mcp-resource-server:
+    build:
+      context: .
+      args:
+        INSTALL_MCP: true
+    image: mcp-resource-server:latest
+    container_name: mcp-resource-server
+    stdin_open: true
+    tty: true
+    environment:
+      - RESOURCE_SERVER_URL_PATTERN=${RESOURCE_SERVER_URL_PATTERN:-file:///mnt/resources/{file_id}}
+      - RESOURCE_SERVER_DEBUG=${RESOURCE_SERVER_DEBUG:-true}
+      - RESOURCE_SERVER_MASK_ERRORS=${RESOURCE_SERVER_MASK_ERRORS:-false}
+      - RESOURCE_SERVER_BLOB_STORAGE_ROOT=${RESOURCE_SERVER_BLOB_STORAGE_ROOT:-/mnt/blob-storage}
+      - RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB=${RESOURCE_SERVER_BLOB_STORAGE_MAX_SIZE_MB:-100}
+      - RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS=${RESOURCE_SERVER_BLOB_STORAGE_TTL_HOURS:-24}
+    volumes:
+      - blob-storage:/mnt/blob-storage
+
+volumes:
+  blob-storage:

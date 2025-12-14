@@ -1,0 +1,22 @@
+services:
+  mcp-resource-server-vscode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_MCP: false
+        CREATE_VSCODE_USER: true
+    image: mcp-resource-server-vscode:latest
+    container_name: mcp-resource-server-devcontainer
+    environment:
+      - RESOURCE_SERVER_URL_PATTERN=${RESOURCE_SERVER_URL_PATTERN:-file:///mnt/resources/{file_id}}
+      - HOST_USER=${USER}
+      - RESOURCE_SERVER_DEBUG=${RESOURCE_SERVER_DEBUG:-true}
+      - RESOURCE_SERVER_MASK_ERRORS=${RESOURCE_SERVER_MASK_ERRORS:-false}
+    # Run as vscode user for devcontainer
+    user: vscode
+    # Mount local workspace for live development
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/c/Users/${USER}/AppData/Roaming/Claude/logs:/workspace/claude-desktop-logs:ro
