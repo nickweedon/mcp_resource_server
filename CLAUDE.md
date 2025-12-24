@@ -1,6 +1,6 @@
 # MCP Resource Server - Claude Context
 
-This is an MCP (Model Context Protocol) server for file and image operations with blob storage support. It enables AI assistants to download, resize, and manage file resources.
+This is an MCP (Model Context Protocol) server for blob storage operations. It provides a two-phase architecture: ingestion (downloading external resources into blob storage) and retrieval (accessing files from blob storage using blob:// URIs).
 
 ## Primary Use Case
 
@@ -32,9 +32,9 @@ mcp_resource_server/
 
 ## Code Organization Guidelines
 
-1. **Focused Architecture**: Single `resources.py` module contains all 7 resource tools
+1. **Focused Architecture**: Single `resources.py` module contains all 6 resource tools
    - get_image, get_image_info, get_image_size_estimate
-   - get_file, get_file_url
+   - get_file
    - upload_image_resource, upload_file_resource
 
 2. **Separation of Concerns**:
@@ -52,11 +52,12 @@ mcp_resource_server/
 
 ### Core Features
 
-1. **Configurable URL Pattern**: Files are downloaded from a configurable URL pattern via `RESOURCE_SERVER_URL_PATTERN` environment variable
-2. **Multi-Protocol Support**: HTTP, HTTPS, and file:// protocols supported
+1. **Two-Phase Architecture**:
+   - Ingestion: Upload tools download from external sources (via RESOURCE_SERVER_URL_PATTERN) and store in blob storage
+   - Retrieval: Get tools read from blob storage using blob:// URIs
+2. **Multi-Protocol Support**: HTTP, HTTPS, and file:// protocols supported (for upload/ingestion only)
 3. **Image Processing**: Automatic resizing with PIL, format conversion, quality control
-4. **Blob Storage**: Shared volume integration using mcp-mapped-resource-lib
-5. **Caching**: 5-minute TTL cache for image downloads to avoid redundant fetches
+4. **Blob Storage**: Shared volume integration using mcp-mapped-resource-lib with blob:// URI abstraction
 
 ### Implementation Standards
 
@@ -69,29 +70,11 @@ mcp_resource_server/
 
 All configuration is done via environment variables. All variables are optional and have sensible defaults.
 
-### URL Pattern
-
-The `RESOURCE_SERVER_URL_PATTERN` environment variable determines where files are downloaded from:
-
-```bash
-# Default (local filesystem)
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
-
-# Custom API
-RESOURCE_SERVER_URL_PATTERN=https://api.example.com/files/{file_id}
-
-# Network share
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
-```
-
-The `{file_id}` placeholder is replaced with the actual file identifier when downloading.
-
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for downloads |
-| `RESOURCE_SERVER_DEBUG` | `true` | Enable timing/logging |
+| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for upload ingestion (used by upload_image_resource and upload_file_resource) |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details |
 | `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path |
 | `BLOB_MAX_SIZE_MB` | `100` | Max file size |
@@ -131,15 +114,15 @@ Use `ToolError` for client-facing errors in tool implementations:
 ```python
 from fastmcp.exceptions import ToolError
 
-def get_file(file_id: str) -> bytes:
-    if not file_id:
-        raise ToolError("file_id is required")
+def get_file(blob_id: str) -> bytes:
+    if not blob_id:
+        raise ToolError("blob_id is required")
 
     try:
-        result = download_file(file_id)
+        result = _get_blob_bytes(blob_id)
         return result
     except Exception as e:
-        raise ToolError(f"Failed to download file: {e}")
+        raise ToolError(f"Failed to read blob: {e}")
 ```
 
 When `RESOURCE_SERVER_MASK_ERRORS=true`, only `ToolError` messages are exposed to clients.
@@ -180,18 +163,36 @@ uv run mcp-resource-server
 
 ## Tools
 
-This server exposes 7 MCP tools for resource operations:
+This server exposes 6 MCP tools for blob storage operations:
 
-### Image Tools
-- **get_image**: Download and resize images (default max 1024px)
-- **get_image_info**: Get metadata (dimensions, format, size)
+### Blob Retrieval Tools (Read Operations - require blob:// URIs)
+- **get_image**: Retrieve and resize images from blob storage
+- **get_image_info**: Get blob image metadata (dimensions, format, size)
 - **get_image_size_estimate**: Estimate resize outcome (dry run)
-- **upload_image_resource**: Store in blob storage and return identifier
+- **get_file**: Retrieve raw file bytes from blob storage
 
-### File Tools
-- **get_file**: Download raw file bytes
-- **get_file_url**: Get download URL without fetching
-- **upload_file_resource**: Store in blob storage and return identifier
+### Blob Upload Tools (Write Operations - download external resources)
+- **upload_image_resource**: Download external image, optionally resize, store in blob storage → returns blob:// URI
+- **upload_file_resource**: Download external file, store in blob storage → returns blob:// URI
+
+## Two-Phase Workflow
+
+### Phase 1: Ingestion (External → Blob Storage)
+Upload tools accept external file_id and download from RESOURCE_SERVER_URL_PATTERN:
+```python
+# Upload external image to blob storage
+response = upload_image_resource("img_12345")
+blob_uri = response.resource_id  # "blob://1733437200-abc123.png"
+```
+
+### Phase 2: Retrieval (Blob Storage → Client)
+Get tools accept ONLY blob:// URIs and read from shared storage:
+```python
+# Retrieve using blob URI
+image = get_image(blob_uri)
+info = get_image_info(blob_uri)
+data = get_file(blob_uri)
+```
 
 ## FastMCP Documentation
 

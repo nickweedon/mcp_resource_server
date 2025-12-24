@@ -1,26 +1,24 @@
 """
 Resources module.
 
-Provides tool functions for file and image operations:
-- get_image: Download an image for display (with optional resizing)
-- get_image_info: Get metadata about an image without downloading resized version
-- get_image_size_estimate: Estimate dimensions and size after resizing (dry run)
-- get_file: Download a file (datasheet, image, etc.)
-- get_file_url: Get the download URL for a file
-- upload_image_resource: Store image in shared storage and return resource identifier
-- upload_file_resource: Store file in shared storage and return resource identifier
+Provides tool functions for blob storage operations:
+- get_image: Retrieve and resize image from blob storage
+- get_image_info: Get metadata about a blob image
+- get_image_size_estimate: Estimate dimensions after resizing (dry run)
+- get_file: Retrieve raw file bytes from blob storage
+- upload_image_resource: Download external image and store in blob storage
+- upload_file_resource: Download external file and store in blob storage
 """
 
 import io
 import mimetypes
 import os
-import time
 from dataclasses import dataclass
 
 import requests
 from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
-from mcp_mapped_resource_lib import BlobStorage
+from mcp_mapped_resource_lib import BlobStorage, blob_id_to_path, BlobNotFoundError, InvalidBlobIdError
 from PIL import Image as PILImage
 
 
@@ -32,13 +30,6 @@ DEFAULT_MAX_DIMENSION = 1024  # Default max width/height in pixels
 DEFAULT_JPEG_QUALITY = 85  # Default JPEG quality (1-100)
 MIN_JPEG_QUALITY = 1
 MAX_JPEG_QUALITY = 100
-_IMAGE_CACHE_TTL = 300  # 5 minutes
-
-# URL pattern configuration
-URL_PATTERN = os.environ.get(
-    "RESOURCE_SERVER_URL_PATTERN",
-    "file:///mnt/resources/{file_id}"
-)
 
 # Blob storage configuration
 BLOB_STORAGE_ROOT = os.environ.get("BLOB_STORAGE_ROOT", "/mnt/blob-storage")
@@ -62,23 +53,52 @@ def _get_blob_storage() -> BlobStorage:
     return _blob_storage
 
 
-def _get_file_url(file_id: str) -> str:
-    """Construct file URL from configured pattern."""
-    return URL_PATTERN.format(file_id=file_id)
+def _get_blob_bytes(blob_id: str) -> tuple[bytes, str | None, str | None]:
+    """
+    Read blob bytes from shared storage volume.
+
+    Args:
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
+
+    Returns:
+        Tuple of (data, content_type, filename)
+
+    Raises:
+        ToolError: If blob_id is invalid or blob not found
+    """
+    if not blob_id:
+        raise ToolError("blob_id is required")
+
+    try:
+        # Get filesystem path for the blob
+        file_path = blob_id_to_path(blob_id, BLOB_STORAGE_ROOT)
+
+        # Read file data
+        with open(file_path, 'rb') as f:
+            data = f.read()
+
+        # Get metadata for content type and filename
+        storage = _get_blob_storage()
+        metadata = storage.get_metadata(blob_id)
+
+        content_type = metadata.get("mime_type")
+        filename = metadata.get("filename")
+
+        return data, content_type, filename
+
+    except InvalidBlobIdError as e:
+        raise ToolError(f"Invalid blob:// URI format: {e}")
+    except BlobNotFoundError as e:
+        raise ToolError(f"Blob not found in storage: {e}")
+    except FileNotFoundError:
+        raise ToolError(f"Blob file missing from shared volume: {blob_id}")
+    except Exception as e:
+        raise ToolError(f"Failed to read blob: {e}")
 
 
 # =============================================================================
 # Response Types
 # =============================================================================
-
-
-@dataclass
-class FileUrlResponse:
-    """Response for file URL retrieval."""
-
-    success: bool
-    url: str | None = None
-    error: str | None = None
 
 
 @dataclass
@@ -125,36 +145,8 @@ class ResourceResponse:
 
 
 # =============================================================================
-# Image Cache
-# =============================================================================
-
-# Cache: file_id -> (data, content_type, filename, timestamp)
-_image_cache: dict[str, tuple[bytes, str | None, str | None, float]] = {}
-
-
-# =============================================================================
 # Internal Helper Functions
 # =============================================================================
-
-
-def _extract_filename(headers: dict, file_id: str, content_type: str | None) -> str | None:
-    """Extract filename from headers or generate from content type."""
-    content_disposition = headers.get("Content-Disposition", "")
-    filename = None
-
-    if "filename=" in content_disposition:
-        # Parse filename from header like: attachment; filename="image.png"
-        parts = content_disposition.split("filename=")
-        if len(parts) > 1:
-            filename = parts[1].strip('"\'')
-
-    # If no filename in header, generate one from file_id and content_type
-    if not filename and content_type:
-        ext = content_type.split("/")[-1].split(";")[0]
-        if ext in ["jpeg", "jpg", "png", "gif", "pdf", "webp"]:
-            filename = f"{file_id}.{ext}"
-
-    return filename
 
 
 def _download_file_bytes(file_id: str) -> tuple[bytes, str | None, str | None]:
@@ -193,7 +185,20 @@ def _download_file_bytes(file_id: str) -> tuple[bytes, str | None, str | None]:
         response.raise_for_status()
 
         content_type = response.headers.get("Content-Type")
-        filename = _extract_filename(response.headers, file_id, content_type)
+
+        # Extract filename from Content-Disposition header or generate from file_id
+        filename = None
+        content_disposition = response.headers.get("Content-Disposition", "")
+        if "filename=" in content_disposition:
+            parts = content_disposition.split("filename=")
+            if len(parts) > 1:
+                filename = parts[1].strip('"\'')
+
+        # Generate filename if not in header
+        if not filename and content_type:
+            ext = content_type.split("/")[-1].split(";")[0]
+            if ext in ["jpeg", "jpg", "png", "gif", "pdf", "webp"]:
+                filename = f"{file_id}.{ext}"
 
         return response.content, content_type, filename
     except requests.RequestException as e:
@@ -202,44 +207,6 @@ def _download_file_bytes(file_id: str) -> tuple[bytes, str | None, str | None]:
         raise ToolError(f"Failed to read local file: {e}")
     except Exception as e:
         raise ToolError(f"Failed to download file: {e}")
-
-
-def _get_cached_image(file_id: str) -> tuple[bytes, str | None, str | None] | None:
-    """Retrieve cached image data if not expired."""
-    if file_id in _image_cache:
-        data, content_type, filename, timestamp = _image_cache[file_id]
-        if time.time() - timestamp < _IMAGE_CACHE_TTL:
-            return data, content_type, filename
-        else:
-            del _image_cache[file_id]
-    return None
-
-
-def _cache_image(
-    file_id: str, data: bytes, content_type: str | None, filename: str | None
-) -> None:
-    """Cache image data with timestamp."""
-    _cleanup_image_cache()
-    _image_cache[file_id] = (data, content_type, filename, time.time())
-
-
-def _cleanup_image_cache() -> None:
-    """Remove expired cache entries."""
-    now = time.time()
-    expired = [k for k, v in _image_cache.items() if now - v[3] > _IMAGE_CACHE_TTL]
-    for k in expired:
-        del _image_cache[k]
-
-
-def _download_image_cached(file_id: str) -> tuple[bytes, str | None, str | None]:
-    """Download image with caching."""
-    cached = _get_cached_image(file_id)
-    if cached:
-        return cached
-
-    data, content_type, filename = _download_file_bytes(file_id)
-    _cache_image(file_id, data, content_type, filename)
-    return data, content_type, filename
 
 
 def _calculate_resize_dimensions(
@@ -390,13 +357,13 @@ def _validate_quality(quality: int | None) -> None:
 
 
 def get_image(
-    file_id: str,
+    blob_id: str,
     max_width: int | None = None,
     max_height: int | None = None,
     quality: int | None = None,
 ) -> Image:
     """
-    Download an image for display, with optional resizing.
+    Retrieve and resize an image from blob storage.
 
     Images are automatically resized to fit within a 1024x1024 bounding box
     by default to optimize for display. Use max_width and/or max_height to
@@ -404,7 +371,7 @@ def get_image(
     original image.
 
     Args:
-        file_id: The file identifier
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
         max_width: Maximum width in pixels. Default: 1024. Set to 0 with max_height=0
                    to disable resizing.
         max_height: Maximum height in pixels. Default: 1024. Set to 0 with max_width=0
@@ -418,28 +385,28 @@ def get_image(
         images are never upscaled.
 
     Raises:
-        ToolError: If the file is not an image, download fails, or quality is invalid
+        ToolError: If the blob is not found, not an image, or quality is invalid
 
     Example:
         # Get image with default sizing (max 1024px)
-        get_image("img_example")
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png")
 
         # Get smaller thumbnail
-        get_image("img_example", max_width=256, max_height=256)
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png", max_width=256, max_height=256)
 
         # Get original full-resolution image
-        get_image("img_example", max_width=0, max_height=0)
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png", max_width=0, max_height=0)
 
         # Get image with high quality JPEG
-        get_image("img_example", quality=95)
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.jpg", quality=95)
     """
     _validate_quality(quality)
 
-    data, content_type, _ = _download_image_cached(file_id)
+    data, content_type, _ = _get_blob_bytes(blob_id)
 
     # Validate that this is an image
     if not content_type or not content_type.startswith("image/"):
-        raise ToolError(f"File is not an image (content-type: {content_type})")
+        raise ToolError(f"Blob is not an image (content-type: {content_type})")
 
     # Extract format from content-type (e.g., "image/png" -> "png")
     image_format = content_type.split("/")[-1].split(";")[0]
@@ -450,16 +417,14 @@ def get_image(
     return Image(data=resized_data, format=image_format)
 
 
-def get_image_info(file_id: str) -> ImageInfoResponse:
+def get_image_info(blob_id: str) -> ImageInfoResponse:
     """
-    Get metadata about an image without downloading the full resized version.
+    Get metadata about a blob image without resizing.
 
-    Use this to check image dimensions and size before downloading. The image
-    is fetched once and cached briefly to avoid redundant downloads if you
-    subsequently call get_image.
+    Use this to check image dimensions and size before downloading.
 
     Args:
-        file_id: The file identifier
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
 
     Returns:
         ImageInfoResponse with:
@@ -471,18 +436,18 @@ def get_image_info(file_id: str) -> ImageInfoResponse:
         - error: Error message if unsuccessful
 
     Raises:
-        ToolError: If the file is not an image or download fails
+        ToolError: If the blob is not found or not an image
 
     Example:
-        info = get_image_info("img_example")
+        info = get_image_info("blob://1733437200-a3f9d8c2b1e4f6a7.png")
         # ImageInfoResponse(success=True, width=2048, height=1536,
-        #                   format='jpeg', file_size_bytes=524288)
+        #                   format='png', file_size_bytes=524288)
     """
-    data, content_type, _ = _download_image_cached(file_id)
+    data, content_type, _ = _get_blob_bytes(blob_id)
 
     # Validate that this is an image
     if not content_type or not content_type.startswith("image/"):
-        raise ToolError(f"File is not an image (content-type: {content_type})")
+        raise ToolError(f"Blob is not an image (content-type: {content_type})")
 
     # Extract format from content-type (e.g., "image/png" -> "png")
     image_format = content_type.split("/")[-1].split(";")[0]
@@ -501,7 +466,7 @@ def get_image_info(file_id: str) -> ImageInfoResponse:
 
 
 def get_image_size_estimate(
-    file_id: str,
+    blob_id: str,
     max_width: int | None = None,
     max_height: int | None = None,
     quality: int | None = None,
@@ -514,7 +479,7 @@ def get_image_size_estimate(
     downloading the actual image.
 
     Args:
-        file_id: The file identifier
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
         max_width: Maximum width in pixels. Default: 1024.
         max_height: Maximum height in pixels. Default: 1024.
         quality: JPEG compression quality (1-100). Default: 85.
@@ -538,10 +503,10 @@ def get_image_size_estimate(
         10-20% depending on image content and compression efficiency.
 
     Raises:
-        ToolError: If the file is not an image, download fails, or quality is invalid
+        ToolError: If the blob is not found, not an image, or quality is invalid
 
     Example:
-        estimate = get_image_size_estimate("img_example", max_width=512)
+        estimate = get_image_size_estimate("blob://1733437200-a3f9d8c2b1e4f6a7.jpg", max_width=512)
         # ImageSizeEstimate(success=True, original_width=2048, original_height=1536,
         #                   estimated_width=512, estimated_height=384,
         #                   original_size_bytes=524288, estimated_size_bytes=65536,
@@ -549,7 +514,7 @@ def get_image_size_estimate(
     """
     _validate_quality(quality)
 
-    data, content_type, _ = _download_image_cached(file_id)
+    data, content_type, _ = _get_blob_bytes(blob_id)
 
     # Validate that this is an image
     if not content_type or not content_type.startswith("image/"):
@@ -596,41 +561,27 @@ def get_image_size_estimate(
     )
 
 
-def get_file(file_id: str) -> bytes:
+def get_file(blob_id: str) -> bytes:
     """
-    Download a file (datasheet, image, etc.).
+    Retrieve raw file bytes from blob storage.
 
-    The file_id is obtained from your data source. Returns binary content
-    suitable for saving to disk or further processing.
+    Use this to download files (PDFs, documents, etc.) that were previously
+    uploaded to blob storage.
 
     Args:
-        file_id: The file identifier
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
 
     Returns:
         Raw file bytes
+
+    Raises:
+        ToolError: If the blob is not found
+
+    Example:
+        data = get_file("blob://1733437200-b4e8d9c3a2f5e7b6.pdf")
     """
-    data, _, _ = _download_file_bytes(file_id)
+    data, _, _ = _get_blob_bytes(blob_id)
     return data
-
-
-def get_file_url(file_id: str) -> FileUrlResponse:
-    """
-    Get the download URL for a file without downloading it.
-
-    Use this when you need the URL for external purposes such as
-    embedding in documents, sharing, or downloading via a browser.
-
-    Args:
-        file_id: The file identifier
-
-    Returns:
-        FileUrlResponse with the download URL
-    """
-    if not file_id:
-        return FileUrlResponse(success=False, error="file_id is required")
-
-    url = _get_file_url(file_id)
-    return FileUrlResponse(success=True, url=url)
 
 
 def upload_image_resource(

@@ -1,23 +1,23 @@
 # MCP Resource Server
 
-A Model Context Protocol (MCP) server for file and image operations with blob storage support using FastMCP. This server provides tools for downloading, resizing, and managing file resources with configurable source URLs.
+A Model Context Protocol (MCP) server for blob storage operations using FastMCP. This server provides a two-phase architecture: ingestion (downloading external resources into blob storage) and retrieval (accessing files via blob:// URIs).
 
 ## Overview
 
-MCP Resource Server is a generic resource management server that provides 7 tools for:
-- File downloads with configurable URL patterns
+MCP Resource Server provides 6 tools for blob storage operations:
+- Blob retrieval using blob:// URIs (get_image, get_file, etc.)
+- Blob upload from external sources (upload_image_resource, upload_file_resource)
 - Image resizing and format conversion
-- Blob storage for sharing files between MCP servers
 - Resource metadata retrieval
 
 ## Features
 
-- **Configurable File Sources**: Support for HTTP, HTTPS, and file:// protocols
+- **Two-Phase Architecture**: Separate ingestion (upload) and retrieval (get) operations
+- **Blob:// URI Abstraction**: All files accessed via blob:// URIs, decoupled from filesystem
 - **Image Processing**: Automatic resizing with PIL, aspect ratio preservation
 - **Blob Storage**: Shared volume integration for multi-service workflows
 - **File Deduplication**: SHA256-based deduplication to save storage
 - **TTL Management**: Automatic cleanup of expired files
-- **Local-First**: Defaults to local filesystem access
 
 ## Requirements
 
@@ -35,11 +35,10 @@ uv sync
 ### 2. Configure environment variables (optional)
 The server works out-of-the-box with sensible defaults. To customize, create a `.env` file in the project root:
 ```bash
-# File Source Configuration (default: file:///mnt/resources/{file_id})
+# Upload Ingestion Configuration (used by upload_* tools)
 RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
 
 # MCP Server Configuration (defaults shown)
-# RESOURCE_SERVER_DEBUG=true
 # RESOURCE_SERVER_MASK_ERRORS=false
 
 # Blob Storage Configuration (defaults shown)
@@ -61,30 +60,11 @@ docker-compose up
 
 ## Configuration
 
-### URL Pattern Examples
-
-The `RESOURCE_SERVER_URL_PATTERN` environment variable controls where files are downloaded from. Use `{file_id}` as a placeholder:
-
-```bash
-# Local filesystem (default)
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
-
-# Custom API
-RESOURCE_SERVER_URL_PATTERN=https://api.example.com/files/{file_id}
-
-# S3-style URLs
-RESOURCE_SERVER_URL_PATTERN=https://mybucket.s3.amazonaws.com/{file_id}
-
-# Network share
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
-```
-
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for file downloads |
-| `RESOURCE_SERVER_DEBUG` | `true` | Enable timing/logging middleware |
+| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for upload ingestion (used by upload_* tools) |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details from clients |
 | `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory |
 | `BLOB_MAX_SIZE_MB` | `100` | Maximum file size in MB |
@@ -92,22 +72,21 @@ RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/{file_id}
 
 ## Available Tools
 
-### File Operations
+### Blob Retrieval Operations (require blob:// URIs)
 
 | Tool | Description |
 |------|-------------|
-| `get_file` | Download raw file bytes |
-| `get_file_url` | Get download URL without fetching |
-| `upload_file_resource` | Store file in shared blob storage |
-
-### Image Operations
-
-| Tool | Description |
-|------|-------------|
-| `get_image` | Download and resize images for display |
-| `get_image_info` | Get metadata (dimensions, format, size) |
+| `get_file` | Retrieve raw file bytes from blob storage |
+| `get_image` | Retrieve and resize images from blob storage |
+| `get_image_info` | Get blob image metadata |
 | `get_image_size_estimate` | Estimate resize dimensions (dry run) |
-| `upload_image_resource` | Store resized image in blob storage |
+
+### Blob Upload Operations (download from external sources)
+
+| Tool | Description |
+|------|-------------|
+| `upload_file_resource` | Download external file and store in blob storage → returns blob:// URI |
+| `upload_image_resource` | Download external image, resize, and store in blob storage → returns blob:// URI |
 
 ## Shared Blob Storage
 
@@ -165,31 +144,45 @@ response = upload_image_resource("img_example")
 
 ## Usage Examples
 
-### Download and resize an image
+### Two-Phase Workflow
+
+#### Phase 1: Upload external resource to blob storage
+```python
+# Upload an external image to blob storage
+response = upload_image_resource("img_12345")
+blob_uri = response.resource_id  # "blob://1733437200-abc123.png"
+
+# Upload a file to blob storage
+response = upload_file_resource("document_456")
+blob_uri = response.resource_id  # "blob://1733437200-def456.pdf"
+```
+
+#### Phase 2: Retrieve from blob storage
+
 ```python
 # Get image with default sizing (max 1024px)
-image = get_image("example_file_id")
+image = get_image("blob://1733437200-abc123.png")
 
 # Get smaller thumbnail
-image = get_image("example_file_id", max_width=256, max_height=256)
+image = get_image("blob://1733437200-abc123.png", max_width=256, max_height=256)
 
 # Get original full-resolution image
-image = get_image("example_file_id", max_width=0, max_height=0)
+image = get_image("blob://1733437200-abc123.png", max_width=0, max_height=0)
 
 # Get image with high quality JPEG
-image = get_image("example_file_id", quality=95)
+image = get_image("blob://1733437200-abc123.jpg", quality=95)
 ```
 
 ### Get image metadata
 ```python
-info = get_image_info("example_file_id")
+info = get_image_info("blob://1733437200-abc123.png")
 # ImageInfoResponse(success=True, width=2048, height=1536,
-#                   format='jpeg', file_size_bytes=524288)
+#                   format='png', file_size_bytes=524288)
 ```
 
 ### Estimate resize dimensions
 ```python
-estimate = get_image_size_estimate("example_file_id", max_width=512)
+estimate = get_image_size_estimate("blob://1733437200-abc123.jpg", max_width=512)
 # ImageSizeEstimate(success=True, original_width=2048, original_height=1536,
 #                   estimated_width=512, estimated_height=384,
 #                   original_size_bytes=524288, estimated_size_bytes=65536,
@@ -198,14 +191,8 @@ estimate = get_image_size_estimate("example_file_id", max_width=512)
 
 ### Download a file
 ```python
-data = get_file("example_file_id")
+data = get_file("blob://1733437200-def456.pdf")
 # Returns raw bytes
-```
-
-### Get file URL
-```python
-response = get_file_url("example_file_id")
-# FileUrlResponse(success=True, url="file:///mnt/resources/example_file_id")
 ```
 
 ## Docker Deployment

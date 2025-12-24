@@ -22,33 +22,31 @@ mask_errors = os.getenv("RESOURCE_SERVER_MASK_ERRORS", "false").lower() in ("tru
 mcp = FastMCP(
     name="MCP Resource Server",
     instructions="""
-    MCP Resource Server provides tools for file and image operations with blob storage support.
+    MCP Resource Server provides blob storage operations for files and images.
 
     ## Tools
 
-    ### File Operations
-    - **get_file**: Download raw file bytes
-    - **get_file_url**: Get download URL without fetching
-    - **upload_file_resource**: Store file in shared blob storage
-
-    ### Image Operations
-    - **get_image**: Download and resize images for display
-    - **get_image_info**: Get metadata (dimensions, format, size)
+    ### Blob Retrieval (Read Operations)
+    - **get_file**: Retrieve raw file bytes from blob storage
+    - **get_image**: Retrieve and resize images from blob storage
+    - **get_image_info**: Get blob image metadata
     - **get_image_size_estimate**: Estimate resize dimensions (dry run)
-    - **upload_image_resource**: Store resized image in blob storage
+
+    ### Blob Upload (Write Operations)
+    - **upload_file_resource**: Download external file and store in blob storage
+    - **upload_image_resource**: Download external image, resize, and store in blob storage
+
+    ## Workflow
+
+    1. **Upload Phase**: Provide external file_id → receive blob:// URI
+    2. **Retrieval Phase**: Use blob:// URI → receive file data
 
     ## Configuration
 
-    Set RESOURCE_SERVER_URL_PATTERN to configure file source:
-    - Default: file:///mnt/resources/{file_id}
-    - Custom API: https://api.example.com/files/{file_id}
-    - Network share: file:///mnt/network-storage/{file_id}
-
-    ## Blob Storage
-
-    Methods with _resource suffix store files in shared Docker volumes
-    for inter-service communication. Files are deduplicated via SHA256
-    and expire after configurable TTL.
+    Blob storage settings (environment variables):
+    - BLOB_STORAGE_ROOT: Storage directory (default: /mnt/blob-storage)
+    - BLOB_MAX_SIZE_MB: Maximum file size (default: 100)
+    - BLOB_TTL_HOURS: Default expiration time (default: 24)
     """,
     mask_error_details=mask_errors,
     on_duplicate_tools="error",
@@ -62,26 +60,14 @@ mcp = FastMCP(
 
 @mcp.tool()
 def get_file(
-    file_id: Annotated[str, "File identifier"],
+    blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
 ) -> bytes:
     """
-    Download raw file bytes.
+    Retrieve raw file bytes from blob storage.
 
-    Returns binary content suitable for saving to disk or further processing.
+    Returns binary content from the specified blob.
     """
-    return resources.get_file(file_id)
-
-
-@mcp.tool()
-def get_file_url(
-    file_id: Annotated[str, "File identifier"],
-) -> resources.FileUrlResponse:
-    """
-    Get download URL without fetching file.
-
-    Returns the constructed URL based on RESOURCE_SERVER_URL_PATTERN.
-    """
-    return resources.get_file_url(file_id)
+    return resources.get_file(blob_id)
 
 
 @mcp.tool()
@@ -105,37 +91,36 @@ def upload_file_resource(
 
 @mcp.tool()
 def get_image(
-    file_id: Annotated[str, "File identifier"],
+    blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
     max_width: Annotated[int | None, "Max width in pixels (default: 1024, 0 to disable)"] = None,
     max_height: Annotated[int | None, "Max height in pixels (default: 1024, 0 to disable)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
 ) -> Image:
     """
-    Download and resize image for display.
+    Retrieve and resize image from blob storage.
 
     Images are automatically resized to fit within 1024x1024 pixels by default
     while preserving aspect ratio. Set both max_width=0 and max_height=0 to
     disable resizing.
     """
-    return resources.get_image(file_id, max_width, max_height, quality)
+    return resources.get_image(blob_id, max_width, max_height, quality)
 
 
 @mcp.tool()
 def get_image_info(
-    file_id: Annotated[str, "File identifier"],
+    blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
 ) -> resources.ImageInfoResponse:
     """
-    Get image metadata without downloading.
+    Get blob image metadata.
 
-    Returns dimensions, format, and file size. The image is cached briefly
-    to optimize subsequent calls to get_image.
+    Returns dimensions, format, and file size for the specified blob image.
     """
-    return resources.get_image_info(file_id)
+    return resources.get_image_info(blob_id)
 
 
 @mcp.tool()
 def get_image_size_estimate(
-    file_id: Annotated[str, "File identifier"],
+    blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
     max_width: Annotated[int | None, "Max width in pixels (default: 1024)"] = None,
     max_height: Annotated[int | None, "Max height in pixels (default: 1024)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
@@ -144,9 +129,9 @@ def get_image_size_estimate(
     Estimate dimensions after resize (dry run).
 
     Predicts what get_image would return without actually resizing. Use this
-    to decide if resize parameters need adjustment before downloading.
+    to decide if resize parameters need adjustment before retrieving.
     """
-    return resources.get_image_size_estimate(file_id, max_width, max_height, quality)
+    return resources.get_image_size_estimate(blob_id, max_width, max_height, quality)
 
 
 @mcp.tool()
