@@ -94,7 +94,6 @@ To customize the server behavior, add environment variables:
         "mcp-resource-server:latest"
       ],
       "env": {
-        "RESOURCE_SERVER_URL_PATTERN": "file:///mnt/resources/{file_id}",
         "RESOURCE_SERVER_DEBUG": "true",
         "RESOURCE_SERVER_MASK_ERRORS": "false",
         "BLOB_STORAGE_ROOT": "/mnt/blob-storage",
@@ -110,28 +109,11 @@ To customize the server behavior, add environment variables:
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for file downloads. Use `{file_id}` placeholder. |
 | `RESOURCE_SERVER_DEBUG` | `true` | Enable debug logging and timing information |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details from Claude |
 | `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Directory for shared blob storage |
 | `BLOB_MAX_SIZE_MB` | `100` | Maximum file size for blob storage |
 | `BLOB_TTL_HOURS` | `24` | Time-to-live for stored blobs |
-
-### URL Pattern Examples
-
-```bash
-# Local filesystem (default)
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
-
-# Custom API endpoint
-RESOURCE_SERVER_URL_PATTERN=https://api.example.com/files/{file_id}
-
-# S3-compatible storage
-RESOURCE_SERVER_URL_PATTERN=https://mybucket.s3.amazonaws.com/{file_id}
-
-# Network share
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/network-storage/files/{file_id}
-```
 
 ## Claude Project Setup
 
@@ -261,11 +243,9 @@ docker logs -f mcp-resource-server
      mcp-resource-server:latest ls -l /mnt/resources/your_file_id
    ```
 
-2. Check the `RESOURCE_SERVER_URL_PATTERN` is correct in your config
+2. Ensure the volume mount path in docker args matches your resources location
 
-3. Ensure the volume mount path in docker args matches your resources location
-
-4. Test with a known-good file first
+3. Test with a known-good file first
 
 #### Image Processing Errors
 

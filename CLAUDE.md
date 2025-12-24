@@ -1,6 +1,6 @@
 # MCP Resource Server - Claude Context
 
-This is an MCP (Model Context Protocol) server for blob storage operations. It provides a two-phase architecture: ingestion (downloading external resources into blob storage) and retrieval (accessing files from blob storage using blob:// URIs).
+This is an MCP (Model Context Protocol) server for blob storage operations. It provides a two-phase architecture: ingestion (storing file bytes into blob storage) and retrieval (accessing files from blob storage using blob:// URIs).
 
 ## Primary Use Case
 
@@ -53,11 +53,10 @@ mcp_resource_server/
 ### Core Features
 
 1. **Two-Phase Architecture**:
-   - Ingestion: Upload tools download from external sources (via RESOURCE_SERVER_URL_PATTERN) and store in blob storage
+   - Ingestion: Upload tools accept raw file bytes and store in blob storage
    - Retrieval: Get tools read from blob storage using blob:// URIs
-2. **Multi-Protocol Support**: HTTP, HTTPS, and file:// protocols supported (for upload/ingestion only)
-3. **Image Processing**: Automatic resizing with PIL, format conversion, quality control
-4. **Blob Storage**: Shared volume integration using mcp-mapped-resource-lib with blob:// URI abstraction
+2. **Image Processing**: Automatic resizing with PIL, format conversion, quality control
+3. **Blob Storage**: Shared volume integration using mcp-mapped-resource-lib with blob:// URI abstraction
 
 ### Implementation Standards
 
@@ -74,7 +73,6 @@ All configuration is done via environment variables. All variables are optional 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for upload ingestion (used by upload_image_resource and upload_file_resource) |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details |
 | `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path |
 | `BLOB_MAX_SIZE_MB` | `100` | Max file size |
@@ -171,17 +169,19 @@ This server exposes 6 MCP tools for blob storage operations:
 - **get_image_size_estimate**: Estimate resize outcome (dry run)
 - **get_file**: Retrieve raw file bytes from blob storage
 
-### Blob Upload Tools (Write Operations - download external resources)
-- **upload_image_resource**: Download external image, optionally resize, store in blob storage → returns blob:// URI
-- **upload_file_resource**: Download external file, store in blob storage → returns blob:// URI
+### Blob Upload Tools (Write Operations - store file bytes)
+- **upload_image_resource**: Accept image bytes, optionally resize, store in blob storage → returns blob:// URI
+- **upload_file_resource**: Accept file bytes, store in blob storage → returns blob:// URI
 
 ## Two-Phase Workflow
 
-### Phase 1: Ingestion (External → Blob Storage)
-Upload tools accept external file_id and download from RESOURCE_SERVER_URL_PATTERN:
+### Phase 1: Ingestion (File Bytes → Blob Storage)
+Upload tools accept raw file bytes and filename:
 ```python
-# Upload external image to blob storage
-response = upload_image_resource("img_12345")
+# Upload image bytes to blob storage
+with open("photo.png", "rb") as f:
+    data = f.read()
+response = upload_image_resource(data, "photo.png")
 blob_uri = response.resource_id  # "blob://1733437200-abc123.png"
 ```
 

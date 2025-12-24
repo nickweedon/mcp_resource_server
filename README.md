@@ -1,12 +1,12 @@
 # MCP Resource Server
 
-A Model Context Protocol (MCP) server for blob storage operations using FastMCP. This server provides a two-phase architecture: ingestion (downloading external resources into blob storage) and retrieval (accessing files via blob:// URIs).
+A Model Context Protocol (MCP) server for blob storage operations using FastMCP. This server provides a two-phase architecture: ingestion (storing file bytes into blob storage) and retrieval (accessing files via blob:// URIs).
 
 ## Overview
 
 MCP Resource Server provides 6 tools for blob storage operations:
 - Blob retrieval using blob:// URIs (get_image, get_file, etc.)
-- Blob upload from external sources (upload_image_resource, upload_file_resource)
+- Blob upload from file bytes (upload_image_resource, upload_file_resource)
 - Image resizing and format conversion
 - Resource metadata retrieval
 
@@ -35,9 +35,6 @@ uv sync
 ### 2. Configure environment variables (optional)
 The server works out-of-the-box with sensible defaults. To customize, create a `.env` file in the project root:
 ```bash
-# Upload Ingestion Configuration (used by upload_* tools)
-RESOURCE_SERVER_URL_PATTERN=file:///mnt/resources/{file_id}
-
 # MCP Server Configuration (defaults shown)
 # RESOURCE_SERVER_MASK_ERRORS=false
 
@@ -64,7 +61,6 @@ docker-compose up
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RESOURCE_SERVER_URL_PATTERN` | `file:///mnt/resources/{file_id}` | URL pattern for upload ingestion (used by upload_* tools) |
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details from clients |
 | `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory |
 | `BLOB_MAX_SIZE_MB` | `100` | Maximum file size in MB |
@@ -81,12 +77,12 @@ docker-compose up
 | `get_image_info` | Get blob image metadata |
 | `get_image_size_estimate` | Estimate resize dimensions (dry run) |
 
-### Blob Upload Operations (download from external sources)
+### Blob Upload Operations (store file bytes)
 
 | Tool | Description |
 |------|-------------|
-| `upload_file_resource` | Download external file and store in blob storage → returns blob:// URI |
-| `upload_image_resource` | Download external image, resize, and store in blob storage → returns blob:// URI |
+| `upload_file_resource` | Store raw file bytes in blob storage → returns blob:// URI |
+| `upload_image_resource` | Store image bytes with optional resizing in blob storage → returns blob:// URI |
 
 ## Shared Blob Storage
 
@@ -94,7 +90,7 @@ The server provides resource-based file storage methods (`upload_image_resource`
 
 ### How It Works
 
-1. Files are downloaded and stored in a shared blob storage directory
+1. File bytes are stored in a shared blob storage directory
 2. Each file gets a unique resource identifier (format: `blob://TIMESTAMP-HASH.EXT`)
 3. Other MCP servers can access these files directly from the mapped volume
 4. Files are automatically deduplicated using SHA256 hashing
@@ -127,11 +123,13 @@ volumes:
 
 ```python
 # Store an image in shared storage
-response = upload_image_resource("img_example")
+with open("photo.png", "rb") as f:
+    data = f.read()
+response = upload_image_resource(data, "photo.png")
 # Returns: ResourceResponse(
 #   success=True,
 #   resource_id="blob://1733437200-a3f9d8c2b1e4f6a7.png",
-#   filename="img_example.png",
+#   filename="photo.png",
 #   mime_type="image/png",
 #   size_bytes=65536,
 #   sha256="a3f9d8c2...",
@@ -146,14 +144,18 @@ response = upload_image_resource("img_example")
 
 ### Two-Phase Workflow
 
-#### Phase 1: Upload external resource to blob storage
+#### Phase 1: Upload file bytes to blob storage
 ```python
-# Upload an external image to blob storage
-response = upload_image_resource("img_12345")
+# Upload image bytes to blob storage
+with open("photo.png", "rb") as f:
+    data = f.read()
+response = upload_image_resource(data, "photo.png")
 blob_uri = response.resource_id  # "blob://1733437200-abc123.png"
 
-# Upload a file to blob storage
-response = upload_file_resource("document_456")
+# Upload file bytes to blob storage
+with open("document.pdf", "rb") as f:
+    data = f.read()
+response = upload_file_resource(data, "document.pdf")
 blob_uri = response.resource_id  # "blob://1733437200-def456.pdf"
 ```
 
@@ -223,10 +225,6 @@ uv run pytest
 ```
 
 ## Important Notes
-
-### File Protocols
-- **HTTP/HTTPS**: Downloads via requests library
-- **file://**: Reads from local filesystem (use absolute paths)
 
 ### Image Processing
 - Images are resized to fit within specified dimensions while preserving aspect ratio

@@ -149,7 +149,6 @@ To use environment variables or different resource location:
         "mcp-resource-server:latest"
       ],
       "env": {
-        "RESOURCE_SERVER_URL_PATTERN": "file:///mnt/resources/{file_id}",
         "BLOB_STORAGE_ROOT": "/mnt/blob-storage",
         "BLOB_MAX_SIZE_MB": "100",
         "BLOB_TTL_HOURS": "24"

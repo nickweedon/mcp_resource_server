@@ -33,12 +33,12 @@ mcp = FastMCP(
     - **get_image_size_estimate**: Estimate resize dimensions (dry run)
 
     ### Blob Upload (Write Operations)
-    - **upload_file_resource**: Download external file and store in blob storage
-    - **upload_image_resource**: Download external image, resize, and store in blob storage
+    - **upload_file_resource**: Store raw file bytes in blob storage
+    - **upload_image_resource**: Store image bytes in blob storage with optional resizing
 
     ## Workflow
 
-    1. **Upload Phase**: Provide external file_id → receive blob:// URI
+    1. **Upload Phase**: Provide file bytes and filename → receive blob:// URI
     2. **Retrieval Phase**: Use blob:// URI → receive file data
 
     ## Configuration
@@ -72,16 +72,17 @@ def get_file(
 
 @mcp.tool()
 def upload_file_resource(
-    file_id: Annotated[str, "File identifier"],
+    data: Annotated[bytes, "Raw file bytes to store"],
+    filename: Annotated[str, "Filename for the stored file (e.g., 'document.pdf')"],
     ttl_hours: Annotated[int | None, "Time-to-live in hours (default: 24)"] = None,
 ) -> resources.ResourceResponse:
     """
-    Store file in shared blob storage.
+    Store file bytes in shared blob storage.
 
-    Downloads file and stores in mapped Docker volume for access by other MCP servers.
+    Stores raw file bytes in mapped Docker volume for access by other MCP servers.
     Returns resource identifier with metadata.
     """
-    return resources.upload_file_resource(file_id, ttl_hours)
+    return resources.upload_file_resource(data, filename, ttl_hours)
 
 
 # =============================================================================
@@ -136,19 +137,20 @@ def get_image_size_estimate(
 
 @mcp.tool()
 def upload_image_resource(
-    file_id: Annotated[str, "File identifier"],
+    data: Annotated[bytes, "Raw image bytes to store"],
+    filename: Annotated[str, "Filename for the stored image (e.g., 'photo.png')"],
     max_width: Annotated[int | None, "Max width in pixels (default: 1024)"] = None,
     max_height: Annotated[int | None, "Max height in pixels (default: 1024)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
     ttl_hours: Annotated[int | None, "Time-to-live in hours (default: 24)"] = None,
 ) -> resources.ResourceResponse:
     """
-    Store resized image in shared blob storage.
+    Store image bytes in shared blob storage with optional resizing.
 
-    Downloads, optionally resizes, and stores image in mapped Docker volume.
+    Optionally resizes and stores image bytes in mapped Docker volume.
     Returns resource identifier for access by other MCP servers.
     """
-    return resources.upload_image_resource(file_id, max_width, max_height, quality, ttl_hours)
+    return resources.upload_image_resource(data, filename, max_width, max_height, quality, ttl_hours)
 
 
 # =============================================================================

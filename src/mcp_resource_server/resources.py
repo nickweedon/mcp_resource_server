@@ -6,16 +6,14 @@ Provides tool functions for blob storage operations:
 - get_image_info: Get metadata about a blob image
 - get_image_size_estimate: Estimate dimensions after resizing (dry run)
 - get_file: Retrieve raw file bytes from blob storage
-- upload_image_resource: Download external image and store in blob storage
-- upload_file_resource: Download external file and store in blob storage
+- upload_image_resource: Store image bytes in blob storage with optional resizing
+- upload_file_resource: Store file bytes in blob storage
 """
 
 import io
-import mimetypes
 import os
 from dataclasses import dataclass
 
-import requests
 from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 from mcp_mapped_resource_lib import BlobStorage, blob_id_to_path, BlobNotFoundError, InvalidBlobIdError
@@ -147,66 +145,6 @@ class ResourceResponse:
 # =============================================================================
 # Internal Helper Functions
 # =============================================================================
-
-
-def _download_file_bytes(file_id: str) -> tuple[bytes, str | None, str | None]:
-    """
-    Download raw file bytes from configured source.
-
-    Uses RESOURCE_SERVER_URL_PATTERN environment variable.
-    Supports http://, https://, and file:// protocols.
-
-    Args:
-        file_id: The file identifier
-
-    Returns:
-        Tuple of (data, content_type, filename)
-
-    Raises:
-        ToolError: If the download fails
-    """
-    if not file_id:
-        raise ToolError("file_id is required")
-
-    try:
-        url = _get_file_url(file_id)
-
-        # Support local files
-        if url.startswith("file://"):
-            path = url[7:]
-            with open(path, 'rb') as f:
-                data = f.read()
-            content_type = mimetypes.guess_type(path)[0]
-            filename = os.path.basename(path)
-            return data, content_type, filename
-
-        # HTTP/HTTPS downloads
-        response = requests.get(url)
-        response.raise_for_status()
-
-        content_type = response.headers.get("Content-Type")
-
-        # Extract filename from Content-Disposition header or generate from file_id
-        filename = None
-        content_disposition = response.headers.get("Content-Disposition", "")
-        if "filename=" in content_disposition:
-            parts = content_disposition.split("filename=")
-            if len(parts) > 1:
-                filename = parts[1].strip('"\'')
-
-        # Generate filename if not in header
-        if not filename and content_type:
-            ext = content_type.split("/")[-1].split(";")[0]
-            if ext in ["jpeg", "jpg", "png", "gif", "pdf", "webp"]:
-                filename = f"{file_id}.{ext}"
-
-        return response.content, content_type, filename
-    except requests.RequestException as e:
-        raise ToolError(f"Failed to download file: {e}")
-    except IOError as e:
-        raise ToolError(f"Failed to read local file: {e}")
-    except Exception as e:
-        raise ToolError(f"Failed to download file: {e}")
 
 
 def _calculate_resize_dimensions(
@@ -585,14 +523,15 @@ def get_file(blob_id: str) -> bytes:
 
 
 def upload_image_resource(
-    file_id: str,
+    data: bytes,
+    filename: str,
     max_width: int | None = None,
     max_height: int | None = None,
     quality: int | None = None,
     ttl_hours: int | None = None,
 ) -> ResourceResponse:
     """
-    Download an image and store it in shared blob storage, returning a resource identifier.
+    Store raw image bytes in shared blob storage, optionally resizing, returning a resource identifier.
 
     This method enables other MCP servers to access the image file through a mapped
     docker volume. The image is stored in the shared storage location and a unique
@@ -602,7 +541,8 @@ def upload_image_resource(
     The image is automatically resized following the same rules as get_image().
 
     Args:
-        file_id: The file identifier
+        data: Raw image bytes to store
+        filename: Filename for the stored image (e.g., "photo.png")
         max_width: Maximum width in pixels. Default: 1024. Set to 0 with max_height=0
                    to disable resizing.
         max_height: Maximum height in pixels. Default: 1024. Set to 0 with max_width=0
@@ -616,7 +556,7 @@ def upload_image_resource(
         ResourceResponse with:
         - success: Whether the operation succeeded
         - resource_id: Unique identifier for the stored blob (format: blob://TIMESTAMP-HASH.EXT)
-        - filename: Original or generated filename (from metadata)
+        - filename: Filename of the stored image (from metadata)
         - mime_type: MIME type of the stored image (from metadata)
         - size_bytes: Size of the stored image in bytes (from metadata)
         - sha256: SHA256 hash of the image data for deduplication (from upload result)
@@ -624,48 +564,44 @@ def upload_image_resource(
         - error: Error message if unsuccessful
 
     Raises:
-        ToolError: If the file is not an image, download fails, quality is invalid,
-                   or storage operation fails
+        ToolError: If the file is not an image, quality is invalid, or storage operation fails
 
     Example:
         # Store image with default settings
-        response = upload_image_resource("img_example")
+        with open("photo.png", "rb") as f:
+            data = f.read()
+        response = upload_image_resource(data, "photo.png")
         # ResourceResponse(success=True, resource_id="blob://1733437200-a3f9d8c2b1e4f6a7.png",
-        #                  filename="img_example.png", mime_type="image/png",
+        #                  filename="photo.png", mime_type="image/png",
         #                  size_bytes=65536, sha256="a3f9d8c2...", expires_at="2024-12-07T12:00:00Z")
 
         # Store smaller thumbnail
-        response = upload_image_resource("img_example", max_width=256, max_height=256)
+        response = upload_image_resource(data, "photo.png", max_width=256, max_height=256)
 
         # Store with custom TTL
-        response = upload_image_resource("img_example", ttl_hours=48)
+        response = upload_image_resource(data, "photo.png", ttl_hours=48)
     """
     try:
         _validate_quality(quality)
 
-        # Download and optionally resize the image
-        data, content_type, filename = _download_image_cached(file_id)
+        if not data:
+            raise ToolError("data is required and cannot be empty")
+        if not filename:
+            raise ToolError("filename is required")
 
-        # Validate that this is an image
-        if not content_type or not content_type.startswith("image/"):
-            raise ToolError(f"File is not an image (content-type: {content_type})")
-
-        # Extract format from content-type
-        image_format = content_type.split("/")[-1].split(";")[0]
+        # Detect image format from the image data
+        img = PILImage.open(io.BytesIO(data))
+        image_format = img.format.lower() if img.format else "png"
 
         # Resize the image
         resized_data, _, _ = _resize_image(data, image_format, max_width, max_height, quality)
-
-        # Generate filename if not provided
-        if not filename:
-            filename = f"{file_id}.{image_format}"
 
         # Store in blob storage
         storage = _get_blob_storage()
         result = storage.upload_blob(
             data=resized_data,
             filename=filename,
-            tags=["resource-server", "image", file_id],
+            tags=["resource-server", "image"],
             ttl_hours=ttl_hours,
         )
 
@@ -689,11 +625,12 @@ def upload_image_resource(
 
 
 def upload_file_resource(
-    file_id: str,
+    data: bytes,
+    filename: str,
     ttl_hours: int | None = None,
 ) -> ResourceResponse:
     """
-    Download a file and store it in shared blob storage, returning a resource identifier.
+    Store raw file bytes in shared blob storage, returning a resource identifier.
 
     This method enables other MCP servers to access the file through a mapped docker
     volume. The file is stored in the shared storage location and a unique resource
@@ -701,7 +638,8 @@ def upload_file_resource(
     the file from the mapped volume.
 
     Args:
-        file_id: The file identifier
+        data: Raw file bytes to store
+        filename: Filename for the stored file (e.g., "document.pdf")
         ttl_hours: Time-to-live in hours. Default: 24. After this time, the blob may
                    be cleaned up from storage.
 
@@ -709,7 +647,7 @@ def upload_file_resource(
         ResourceResponse with:
         - success: Whether the operation succeeded
         - resource_id: Unique identifier for the stored blob (format: blob://TIMESTAMP-HASH.EXT)
-        - filename: Original or generated filename (from metadata)
+        - filename: Filename of the stored file (from metadata)
         - mime_type: MIME type of the stored file (from metadata)
         - size_bytes: Size of the stored file in bytes (from metadata)
         - sha256: SHA256 hash of the file data for deduplication (from upload result)
@@ -717,35 +655,32 @@ def upload_file_resource(
         - error: Error message if unsuccessful
 
     Raises:
-        ToolError: If download fails or storage operation fails
+        ToolError: If storage operation fails
 
     Example:
         # Store file with default settings
-        response = upload_file_resource("datasheet_example")
+        with open("document.pdf", "rb") as f:
+            data = f.read()
+        response = upload_file_resource(data, "document.pdf")
         # ResourceResponse(success=True, resource_id="blob://1733437200-b4e8d9c3a2f5e7b6.pdf",
-        #                  filename="datasheet_example.pdf", mime_type="application/pdf",
+        #                  filename="document.pdf", mime_type="application/pdf",
         #                  size_bytes=524288, sha256="b4e8d9c3...", expires_at="2024-12-07T12:00:00Z")
 
         # Store with custom TTL
-        response = upload_file_resource("datasheet_example", ttl_hours=72)
+        response = upload_file_resource(data, "document.pdf", ttl_hours=72)
     """
     try:
-        # Download the file
-        data, content_type, filename = _download_file_bytes(file_id)
-
-        # Generate filename if not provided
+        if not data:
+            raise ToolError("data is required and cannot be empty")
         if not filename:
-            ext = "bin"
-            if content_type:
-                ext = content_type.split("/")[-1].split(";")[0]
-            filename = f"{file_id}.{ext}"
+            raise ToolError("filename is required")
 
         # Store in blob storage
         storage = _get_blob_storage()
         result = storage.upload_blob(
             data=data,
             filename=filename,
-            tags=["resource-server", "file", file_id],
+            tags=["resource-server", "file"],
             ttl_hours=ttl_hours,
         )
 
