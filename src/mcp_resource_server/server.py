@@ -93,16 +93,17 @@ def upload_file_resource(
 @mcp.tool()
 def get_image(
     blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
-    max_width: Annotated[int | None, "Max width in pixels (default: 1024, 0 to disable)"] = None,
-    max_height: Annotated[int | None, "Max height in pixels (default: 1024, 0 to disable)"] = None,
+    max_width: Annotated[int | None, "Max width in pixels (default: 1920 if both omitted, else calculated from aspect ratio)"] = None,
+    max_height: Annotated[int | None, "Max height in pixels (default: 1080 if both omitted, else calculated from aspect ratio)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
 ) -> Image:
     """
     Retrieve and resize image from blob storage.
 
-    Images are automatically resized to fit within 1024x1024 pixels by default
-    while preserving aspect ratio. Set both max_width=0 and max_height=0 to
-    disable resizing.
+    Images are automatically resized to fit within 1920x1080 pixels by default
+    (when both dimensions omitted) while preserving aspect ratio. If only one
+    dimension is specified, the other is calculated to maintain aspect ratio.
+    Set both max_width=0 and max_height=0 to disable resizing.
     """
     return resources.get_image(blob_id, max_width, max_height, quality)
 
@@ -122,8 +123,8 @@ def get_image_info(
 @mcp.tool()
 def get_image_size_estimate(
     blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
-    max_width: Annotated[int | None, "Max width in pixels (default: 1024)"] = None,
-    max_height: Annotated[int | None, "Max height in pixels (default: 1024)"] = None,
+    max_width: Annotated[int | None, "Max width in pixels (default: 1920 if both omitted, else calculated from aspect ratio)"] = None,
+    max_height: Annotated[int | None, "Max height in pixels (default: 1080 if both omitted, else calculated from aspect ratio)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
 ) -> resources.ImageSizeEstimate:
     """
@@ -139,16 +140,18 @@ def get_image_size_estimate(
 def upload_image_resource(
     data: Annotated[bytes, "Raw image bytes to store"],
     filename: Annotated[str, "Filename for the stored image (e.g., 'photo.png')"],
-    max_width: Annotated[int | None, "Max width in pixels (default: 1024)"] = None,
-    max_height: Annotated[int | None, "Max height in pixels (default: 1024)"] = None,
+    max_width: Annotated[int | None, "Max width in pixels (default: 1920 if both omitted, else calculated from aspect ratio)"] = None,
+    max_height: Annotated[int | None, "Max height in pixels (default: 1080 if both omitted, else calculated from aspect ratio)"] = None,
     quality: Annotated[int | None, "JPEG quality 1-100 (default: 85)"] = None,
     ttl_hours: Annotated[int | None, "Time-to-live in hours (default: 24)"] = None,
 ) -> resources.ResourceResponse:
     """
     Store image bytes in shared blob storage with optional resizing.
 
-    Optionally resizes and stores image bytes in mapped Docker volume.
-    Returns resource identifier for access by other MCP servers.
+    Resizes to 1920x1080 by default (when both dimensions omitted). If only one
+    dimension is specified, the other is calculated to maintain aspect ratio.
+    Stores image bytes in mapped Docker volume and returns resource identifier
+    for access by other MCP servers.
     """
     return resources.upload_image_resource(data, filename, max_width, max_height, quality, ttl_hours)
 

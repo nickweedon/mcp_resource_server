@@ -49,6 +49,110 @@ class TestImageProcessing:
         assert height == 1536
         assert should_resize is False
 
+    def test_calculate_resize_dimensions_both_none_uses_defaults(self):
+        """Test that both None uses 1920x1080 defaults."""
+        # Image larger than defaults should be resized
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=3840,
+            original_height=2160,
+            max_width=None,
+            max_height=None,
+        )
+        assert width == 1920
+        assert height == 1080
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_both_none_no_upscale(self):
+        """Test that both None doesn't upscale small images."""
+        # Image smaller than defaults should not be resized
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=800,
+            original_height=600,
+            max_width=None,
+            max_height=None,
+        )
+        assert width == 800
+        assert height == 600
+        assert should_resize is False
+
+    def test_calculate_resize_dimensions_only_width_specified(self):
+        """Test only max_width specified, height calculated from aspect ratio."""
+        # 2048x1536 with max_width=800 should give 800x600
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=2048,
+            original_height=1536,
+            max_width=800,
+            max_height=None,
+        )
+        assert width == 800
+        assert height == 600
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_only_height_specified(self):
+        """Test only max_height specified, width calculated from aspect ratio."""
+        # 2048x1536 with max_height=600 should give 800x600
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=2048,
+            original_height=1536,
+            max_width=None,
+            max_height=600,
+        )
+        assert width == 800
+        assert height == 600
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_width_zero_height_specified(self):
+        """Test max_width=0 with max_height specified (no width constraint)."""
+        # 2048x1536 with max_width=0, max_height=600 should give 800x600
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=2048,
+            original_height=1536,
+            max_width=0,
+            max_height=600,
+        )
+        assert width == 800
+        assert height == 600
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_height_zero_width_specified(self):
+        """Test max_height=0 with max_width specified (no height constraint)."""
+        # 2048x1536 with max_width=800, max_height=0 should give 800x600
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=2048,
+            original_height=1536,
+            max_width=800,
+            max_height=0,
+        )
+        assert width == 800
+        assert height == 600
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_portrait_image_width_only(self):
+        """Test portrait image with only width specified."""
+        # 1536x2048 (portrait) with max_width=600 should give 600x800
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=1536,
+            original_height=2048,
+            max_width=600,
+            max_height=None,
+        )
+        assert width == 600
+        assert height == 800
+        assert should_resize is True
+
+    def test_calculate_resize_dimensions_portrait_image_height_only(self):
+        """Test portrait image with only height specified."""
+        # 1536x2048 (portrait) with max_height=800 should give 600x800
+        width, height, should_resize = resources._calculate_resize_dimensions(
+            original_width=1536,
+            original_height=2048,
+            max_width=None,
+            max_height=800,
+        )
+        assert width == 600
+        assert height == 800
+        assert should_resize is True
+
     def test_validate_quality_valid(self):
         """Test quality validation with valid values."""
         resources._validate_quality(1)

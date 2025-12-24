@@ -24,7 +24,8 @@ from PIL import Image as PILImage
 # Constants
 # =============================================================================
 
-DEFAULT_MAX_DIMENSION = 1024  # Default max width/height in pixels
+DEFAULT_MAX_DIMENSION = 1920  # Default max width in pixels
+DEFAULT_MAX_HEIGHT = 1080  # Default max height in pixels
 DEFAULT_JPEG_QUALITY = 85  # Default JPEG quality (1-100)
 MIN_JPEG_QUALITY = 1
 MAX_JPEG_QUALITY = 100
@@ -156,11 +157,19 @@ def _calculate_resize_dimensions(
     """
     Calculate target dimensions preserving aspect ratio.
 
+    Behavior based on parameter combinations:
+    - Both None: Use defaults (1920x1080)
+    - Only max_width None: Calculate width from height, maintaining aspect ratio
+    - Only max_height None: Calculate height from width, maintaining aspect ratio
+    - Both specified: Use both as constraints
+    - Both 0: Disable resizing entirely
+    - One 0: Ignore that dimension's constraint
+
     Args:
         original_width: Original image width in pixels
         original_height: Original image height in pixels
-        max_width: Maximum width constraint (0 to disable, None for default)
-        max_height: Maximum height constraint (0 to disable, None for default)
+        max_width: Maximum width constraint (None for default/calculated, 0 to ignore)
+        max_height: Maximum height constraint (None for default/calculated, 0 to ignore)
 
     Returns:
         Tuple of (new_width, new_height, would_resize)
@@ -169,15 +178,26 @@ def _calculate_resize_dimensions(
     if max_width == 0 and max_height == 0:
         return original_width, original_height, False
 
-    # Apply defaults
-    effective_max_width = DEFAULT_MAX_DIMENSION if max_width is None else max_width
-    effective_max_height = DEFAULT_MAX_DIMENSION if max_height is None else max_height
-
-    # Handle case where one dimension is 0 (no constraint on that axis)
-    if effective_max_width == 0:
+    # Determine effective constraints
+    # If both are None, use defaults (1920x1080)
+    # If only one is None, use no constraint on that axis (maintain aspect ratio)
+    # If one is 0, use no constraint on that axis
+    if max_width is None and max_height is None:
+        # Both omitted - use defaults
+        effective_max_width = DEFAULT_MAX_DIMENSION
+        effective_max_height = DEFAULT_MAX_HEIGHT
+    elif max_width is None:
+        # Only width omitted - no width constraint, maintain aspect ratio from height
         effective_max_width = original_width
-    if effective_max_height == 0:
+        effective_max_height = max_height if max_height != 0 else original_height
+    elif max_height is None:
+        # Only height omitted - no height constraint, maintain aspect ratio from width
+        effective_max_width = max_width if max_width != 0 else original_width
         effective_max_height = original_height
+    else:
+        # Both specified - use them (handle 0 as no constraint)
+        effective_max_width = original_width if max_width == 0 else max_width
+        effective_max_height = original_height if max_height == 0 else max_height
 
     # Check if resize needed (never upscale)
     if original_width <= effective_max_width and original_height <= effective_max_height:
@@ -303,33 +323,40 @@ def get_image(
     """
     Retrieve and resize an image from blob storage.
 
-    Images are automatically resized to fit within a 1024x1024 bounding box
-    by default to optimize for display. Use max_width and/or max_height to
-    override the default, or set both to 0 to disable resizing and get the
-    original image.
+    Images are automatically resized to fit within a 1920x1080 bounding box
+    by default (when both max_width and max_height are omitted) to optimize
+    for display. Aspect ratio is always preserved.
 
     Args:
         blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
-        max_width: Maximum width in pixels. Default: 1024. Set to 0 with max_height=0
-                   to disable resizing.
-        max_height: Maximum height in pixels. Default: 1024. Set to 0 with max_width=0
-                    to disable resizing.
+        max_width: Maximum width in pixels. If omitted while max_height is specified,
+                   width will be calculated to maintain aspect ratio. If both are omitted,
+                   defaults to 1920. Set to 0 with max_height=0 to disable resizing.
+        max_height: Maximum height in pixels. If omitted while max_width is specified,
+                    height will be calculated to maintain aspect ratio. If both are omitted,
+                    defaults to 1080. Set to 0 with max_width=0 to disable resizing.
         quality: JPEG compression quality (1-100). Default: 85. Only applies to JPEG
                  images; ignored for PNG/GIF/WebP.
 
     Returns:
         Image object for rendering. The image is resized to fit
-        within the specified bounding box while preserving aspect ratio. Small
+        within the specified constraints while preserving aspect ratio. Small
         images are never upscaled.
 
     Raises:
         ToolError: If the blob is not found, not an image, or quality is invalid
 
     Example:
-        # Get image with default sizing (max 1024px)
+        # Get image with default sizing (max 1920x1080)
         get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png")
 
-        # Get smaller thumbnail
+        # Get image with max width 800px, height calculated to maintain aspect ratio
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png", max_width=800)
+
+        # Get image with max height 600px, width calculated to maintain aspect ratio
+        get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png", max_height=600)
+
+        # Get smaller thumbnail (square bounding box)
         get_image("blob://1733437200-a3f9d8c2b1e4f6a7.png", max_width=256, max_height=256)
 
         # Get original full-resolution image
@@ -418,8 +445,12 @@ def get_image_size_estimate(
 
     Args:
         blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
-        max_width: Maximum width in pixels. Default: 1024.
-        max_height: Maximum height in pixels. Default: 1024.
+        max_width: Maximum width in pixels. If omitted while max_height is specified,
+                   width will be calculated to maintain aspect ratio. If both are omitted,
+                   defaults to 1920.
+        max_height: Maximum height in pixels. If omitted while max_width is specified,
+                    height will be calculated to maintain aspect ratio. If both are omitted,
+                    defaults to 1080.
         quality: JPEG compression quality (1-100). Default: 85.
 
     Returns:
@@ -543,10 +574,12 @@ def upload_image_resource(
     Args:
         data: Raw image bytes to store
         filename: Filename for the stored image (e.g., "photo.png")
-        max_width: Maximum width in pixels. Default: 1024. Set to 0 with max_height=0
-                   to disable resizing.
-        max_height: Maximum height in pixels. Default: 1024. Set to 0 with max_width=0
-                    to disable resizing.
+        max_width: Maximum width in pixels. If omitted while max_height is specified,
+                   width will be calculated to maintain aspect ratio. If both are omitted,
+                   defaults to 1920. Set to 0 with max_height=0 to disable resizing.
+        max_height: Maximum height in pixels. If omitted while max_width is specified,
+                    height will be calculated to maintain aspect ratio. If both are omitted,
+                    defaults to 1080. Set to 0 with max_width=0 to disable resizing.
         quality: JPEG compression quality (1-100). Default: 85. Only applies to JPEG
                  images; ignored for PNG/GIF/WebP.
         ttl_hours: Time-to-live in hours. Default: 24. After this time, the blob may
