@@ -11,6 +11,8 @@ services:
       - "8000:8000"
     volumes:
       # Persistent blob storage
+      # For host path mapping, use: - /host/path:/mnt/blob-storage
+      # and set HOST_BLOB_STORAGE_ROOT=/host/path in .env
       - blob-storage:/mnt/blob-storage
     restart: unless-stopped
     # Resource limits for image processing

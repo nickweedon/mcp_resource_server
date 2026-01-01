@@ -32,9 +32,9 @@ mcp_resource_server/
 
 ## Code Organization Guidelines
 
-1. **Focused Architecture**: Single `resources.py` module contains all 6 resource tools
+1. **Focused Architecture**: Single `resources.py` module contains all 7 resource tools
    - get_image, get_image_info, get_image_size_estimate
-   - get_file
+   - get_file, get_native_path
    - upload_image_resource, upload_file_resource
 
 2. **Separation of Concerns**:
@@ -74,7 +74,8 @@ All configuration is done via environment variables. All variables are optional 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details |
-| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path |
+| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Shared storage path (container) |
+| `HOST_BLOB_STORAGE_ROOT` | `""` | Host filesystem path (for Docker) |
 | `BLOB_MAX_SIZE_MB` | `100` | Max file size |
 | `BLOB_TTL_HOURS` | `24` | Blob expiration time |
 
@@ -161,13 +162,14 @@ uv run mcp-resource-server
 
 ## Tools
 
-This server exposes 6 MCP tools for blob storage operations:
+This server exposes 7 MCP tools for blob storage operations:
 
 ### Blob Retrieval Tools (Read Operations - require blob:// URIs)
 - **get_image**: Retrieve and resize images from blob storage
 - **get_image_info**: Get blob image metadata (dimensions, format, size)
 - **get_image_size_estimate**: Estimate resize outcome (dry run)
 - **get_file**: Retrieve raw file bytes from blob storage
+- **get_native_path**: Get native filesystem path to blob file (useful for Docker)
 
 ### Blob Upload Tools (Write Operations - store file bytes)
 - **upload_image_resource**: Accept image bytes, optionally resize, store in blob storage → returns blob:// URI
@@ -192,6 +194,12 @@ Get tools accept ONLY blob:// URIs and read from shared storage:
 image = get_image(blob_uri)
 info = get_image_info(blob_uri)
 data = get_file(blob_uri)
+
+# Get native filesystem path (useful for Docker or external tools)
+path_info = get_native_path(blob_uri)
+# path_info.native_path - primary path (host if configured, otherwise container)
+# path_info.host_path - host filesystem path (if HOST_BLOB_STORAGE_ROOT is set)
+# path_info.container_path - path inside container
 ```
 
 ## FastMCP Documentation

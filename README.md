@@ -4,11 +4,12 @@ A Model Context Protocol (MCP) server for blob storage operations using FastMCP.
 
 ## Overview
 
-MCP Resource Server provides 6 tools for blob storage operations:
-- Blob retrieval using blob:// URIs (get_image, get_file, etc.)
+MCP Resource Server provides 7 tools for blob storage operations:
+- Blob retrieval using blob:// URIs (get_image, get_file, get_native_path, etc.)
 - Blob upload from file bytes (upload_image_resource, upload_file_resource)
 - Image resizing and format conversion
 - Resource metadata retrieval
+- Native filesystem path access (useful for Docker environments)
 
 ## Features
 
@@ -62,7 +63,8 @@ docker-compose up
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RESOURCE_SERVER_MASK_ERRORS` | `false` | Hide internal error details from clients |
-| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory |
+| `BLOB_STORAGE_ROOT` | `/mnt/blob-storage` | Path to shared storage directory (container) |
+| `HOST_BLOB_STORAGE_ROOT` | `""` | Host filesystem path (for Docker environments) |
 | `BLOB_MAX_SIZE_MB` | `100` | Maximum file size in MB |
 | `BLOB_TTL_HOURS` | `24` | Default time-to-live for blobs |
 
@@ -76,6 +78,7 @@ docker-compose up
 | `get_image` | Retrieve and resize images from blob storage |
 | `get_image_info` | Get blob image metadata |
 | `get_image_size_estimate` | Estimate resize dimensions (dry run) |
+| `get_native_path` | Get native filesystem path to blob file |
 
 ### Blob Upload Operations (store file bytes)
 
@@ -106,9 +109,14 @@ services:
   mcp-resource-server:
     image: mcp-resource-server:latest
     volumes:
+      # Option 1: Named volume (recommended for most use cases)
       - blob-storage:/mnt/blob-storage
+      # Option 2: Host path mapping (use with HOST_BLOB_STORAGE_ROOT)
+      # - /workspace/blob-storage:/mnt/blob-storage
     environment:
       - BLOB_STORAGE_ROOT=/mnt/blob-storage
+      # Only needed when using host path mapping (Option 2)
+      # - HOST_BLOB_STORAGE_ROOT=/workspace/blob-storage
 
   other-mcp-server:
     image: other-mcp:latest
@@ -195,6 +203,19 @@ estimate = get_image_size_estimate("blob://1733437200-abc123.jpg", max_width=512
 ```python
 data = get_file("blob://1733437200-def456.pdf")
 # Returns raw bytes
+```
+
+### Get native filesystem path
+```python
+# Useful when running in Docker and need to pass file paths to external tools
+path_info = get_native_path("blob://1733437200-abc123.png")
+# NativePathResponse(
+#     success=True,
+#     native_path="/workspace/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+#     host_path="/workspace/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+#     container_path="/mnt/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+#     blob_id="blob://1733437200-abc123.png"
+# )
 ```
 
 ## Docker Deployment

@@ -6,6 +6,7 @@ Provides tool functions for blob storage operations:
 - get_image_info: Get metadata about a blob image
 - get_image_size_estimate: Estimate dimensions after resizing (dry run)
 - get_file: Retrieve raw file bytes from blob storage
+- get_native_path: Get native filesystem path to blob file
 - upload_image_resource: Store image bytes in blob storage with optional resizing
 - upload_file_resource: Store file bytes in blob storage
 """
@@ -32,6 +33,7 @@ MAX_JPEG_QUALITY = 100
 
 # Blob storage configuration
 BLOB_STORAGE_ROOT = os.environ.get("BLOB_STORAGE_ROOT", "/mnt/blob-storage")
+HOST_BLOB_STORAGE_ROOT = os.environ.get("HOST_BLOB_STORAGE_ROOT", "")
 BLOB_STORAGE_MAX_SIZE_MB = int(os.environ.get("BLOB_MAX_SIZE_MB", "100"))
 BLOB_STORAGE_TTL_HOURS = int(os.environ.get("BLOB_TTL_HOURS", "24"))
 
@@ -140,6 +142,18 @@ class ResourceResponse:
     size_bytes: int | None = None
     sha256: str | None = None
     expires_at: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class NativePathResponse:
+    """Response containing native filesystem path to blob."""
+
+    success: bool
+    native_path: str | None = None
+    host_path: str | None = None
+    container_path: str | None = None
+    blob_id: str | None = None
     error: str | None = None
 
 
@@ -734,3 +748,91 @@ def upload_file_resource(
         raise
     except Exception as e:
         raise ToolError(f"Failed to create file resource: {e}")
+
+
+def get_native_path(blob_id: str) -> NativePathResponse:
+    """
+    Get the native filesystem path where a blob is actually stored.
+
+    This tool returns the full filesystem path to the blob file, which is useful
+    when you need to pass the file location to external tools or processes that
+    need direct file access.
+
+    When running in Docker, this returns both:
+    - container_path: The path inside the Docker container (e.g., /mnt/blob-storage/...)
+    - host_path: The path on the host machine (if HOST_BLOB_STORAGE_ROOT is configured)
+
+    Args:
+        blob_id: Blob URI (format: blob://TIMESTAMP-HASH.EXT)
+
+    Returns:
+        NativePathResponse with:
+        - success: Whether the operation succeeded
+        - native_path: The primary native path (host path if available, otherwise container path)
+        - host_path: Path on the host filesystem (only if HOST_BLOB_STORAGE_ROOT is set)
+        - container_path: Path inside the container/process
+        - blob_id: The blob URI that was queried
+        - error: Error message if unsuccessful
+
+    Raises:
+        ToolError: If the blob_id is invalid or blob not found
+
+    Example:
+        # When running in Docker with HOST_BLOB_STORAGE_ROOT=/workspace/blob-storage
+        path = get_native_path("blob://1733437200-a3f9d8c2b1e4f6a7.png")
+        # NativePathResponse(
+        #     success=True,
+        #     native_path="/workspace/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+        #     host_path="/workspace/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+        #     container_path="/mnt/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+        #     blob_id="blob://1733437200-a3f9d8c2b1e4f6a7.png"
+        # )
+
+        # When running without Docker (HOST_BLOB_STORAGE_ROOT not set)
+        path = get_native_path("blob://1733437200-a3f9d8c2b1e4f6a7.png")
+        # NativePathResponse(
+        #     success=True,
+        #     native_path="/mnt/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+        #     host_path=None,
+        #     container_path="/mnt/blob-storage/a3/f9/1733437200-a3f9d8c2b1e4f6a7.png",
+        #     blob_id="blob://1733437200-a3f9d8c2b1e4f6a7.png"
+        # )
+    """
+    if not blob_id:
+        raise ToolError("blob_id is required")
+
+    try:
+        # Get the container/process filesystem path
+        container_path = blob_id_to_path(blob_id, BLOB_STORAGE_ROOT)
+
+        # Verify the blob exists
+        if not os.path.exists(container_path):
+            raise ToolError(f"Blob file not found: {blob_id}")
+
+        # Calculate host path if configured
+        host_path = None
+        if HOST_BLOB_STORAGE_ROOT:
+            # Get the relative path from BLOB_STORAGE_ROOT
+            relative_path = os.path.relpath(container_path, BLOB_STORAGE_ROOT)
+            # Join with HOST_BLOB_STORAGE_ROOT
+            host_path = os.path.join(HOST_BLOB_STORAGE_ROOT, relative_path)
+
+        # Primary native path is host path if available, otherwise container path
+        native_path = host_path if host_path else container_path
+
+        return NativePathResponse(
+            success=True,
+            native_path=native_path,
+            host_path=host_path,
+            container_path=container_path,
+            blob_id=blob_id,
+        )
+
+    except InvalidBlobIdError as e:
+        raise ToolError(f"Invalid blob:// URI format: {e}")
+    except BlobNotFoundError as e:
+        raise ToolError(f"Blob not found in storage: {e}")
+    except ToolError:
+        raise
+    except Exception as e:
+        raise ToolError(f"Failed to get native path: {e}")
