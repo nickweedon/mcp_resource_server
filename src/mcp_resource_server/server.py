@@ -28,6 +28,7 @@ mcp = FastMCP(
 
     ### Blob Retrieval (Read Operations)
     - **get_file**: Retrieve raw file bytes from blob storage
+    - **get_file_info**: Get filesystem path and metadata for a blob file
     - **get_image**: Retrieve and resize images from blob storage
     - **get_image_info**: Get blob image metadata
     - **get_image_size_estimate**: Estimate resize dimensions (dry run)
@@ -68,6 +69,20 @@ def get_file(
     Returns binary content from the specified blob.
     """
     return resources.get_file(blob_id)
+
+
+@mcp.tool()
+def get_file_info(
+    blob_id: Annotated[str, "Blob URI (blob://TIMESTAMP-HASH.EXT)"],
+) -> resources.FileInfoResponse:
+    """
+    Get filesystem path and metadata for a blob file.
+
+    Returns the filesystem path to the blob file along with its metadata. Useful when
+    you need to pass the file location to external tools or processes that need direct
+    file access. Host path is only included if HOST_BLOB_STORAGE_ROOT is configured.
+    """
+    return resources.get_file_info(blob_id)
 
 
 @mcp.tool()
